@@ -1,0 +1,116 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id         Int       @id @default(autoincrement())
+  email      String    @unique
+  phone      String?   @unique
+  role       Role
+  password   String
+  status     Status    @default(PENDING)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  vehicles         Vehicle[]
+  reservations     Reservation[]
+  messagesSent     Message[] @relation("SentMessages")
+  messagesReceived Message[] @relation("ReceivedMessages")
+  favorites        Favorite[]
+}
+
+model Vehicle {
+  id            Int              @id @default(autoincrement())
+  parkingId     Int
+  parking       User             @relation(fields: [parkingId], references: [id])
+  marque        String
+  prix          Float
+  description   String
+  photos        String[]         // URLs des photos (Cloudinary)
+  garantie      Boolean
+  dureeGarantie Int?
+  documents     String[]         // URLs des documents
+  chauffeur     Boolean
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  reservations  Reservation[]
+  stats         VehicleStats?
+  history       VehicleHistory[]
+  favorites     Favorite[]
+}
+
+model Reservation {
+  id         Int       @id @default(autoincrement())
+  userId     Int
+  vehicleId  Int
+  user       User      @relation(fields: [userId], references: [id])
+  vehicle    Vehicle   @relation(fields: [vehicleId], references: [id])
+  dateDebut  DateTime
+  dateFin    DateTime
+  type       ReservationType
+  commission Float?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+}
+
+model Message {
+  id         Int      @id @default(autoincrement())
+  senderId   Int
+  receiverId Int
+  sender     User     @relation("SentMessages", fields: [senderId], references: [id])
+  receiver   User     @relation("ReceivedMessages", fields: [receiverId], references: [id])
+  content    String
+  createdAt  DateTime @default(now())
+}
+
+model VehicleStats {
+  id           Int      @id @default(autoincrement())
+  vehicleId    Int      @unique
+  vehicle      Vehicle  @relation(fields: [vehicleId], references: [id])
+  vues         Int      @default(0)
+  reservations Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model VehicleHistory {
+  id        Int      @id @default(autoincrement())
+  vehicleId Int
+  vehicle   Vehicle  @relation(fields: [vehicleId], references: [id])
+  changes   String   // Détails des modifications
+  createdAt DateTime @default(now())
+}
+
+model Favorite {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  vehicleId Int
+  user      User     @relation(fields: [userId], references: [id])
+  vehicle   Vehicle  @relation(fields: [vehicleId], references: [id])
+  createdAt DateTime @default(now())
+
+  @@unique([userId, vehicleId])
+}
+
+enum Role {
+  CLIENT
+  PARKING
+  ADMIN
+}
+
+enum Status {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum ReservationType {
+  ACHAT
+  LOCATION
+}
