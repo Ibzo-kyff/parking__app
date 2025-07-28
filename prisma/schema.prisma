@@ -13,6 +13,12 @@ model User {
   phone      String?   @unique
   role       Role
   password   String
+  refreshToken String?
+  emailVerified Boolean @default(false)
+  verificationToken String?
+  verificationTokenExpires DateTime?
+  passwordResetToken String?
+  passwordResetExpires DateTime?
   status     Status    @default(PENDING)
   createdAt  DateTime  @default(now())
   updatedAt  DateTime  @updatedAt
@@ -22,6 +28,9 @@ model User {
   messagesSent     Message[] @relation("SentMessages")
   messagesReceived Message[] @relation("ReceivedMessages")
   favorites        Favorite[]
+  
+  @@unique([verificationToken])
+  @@unique([passwordResetToken])
 }
 
 model Vehicle {
