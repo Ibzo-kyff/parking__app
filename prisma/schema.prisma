@@ -11,38 +11,84 @@ model User {
   id         Int       @id @default(autoincrement())
   email      String    @unique
   phone      String?   @unique
-  role       Role
+  role       Role      @default(CLIENT)
   password   String
+<<<<<<< Updated upstream
   status     Status    @default(PENDING)
+=======
+  refreshToken String?
+  emailVerified Boolean @default(false)
+  verificationToken String?
+  verificationTokenExpires DateTime?
+  passwordResetToken String?
+  passwordResetExpires DateTime?
+  status     Status?   // Utilisé uniquement pour PARKING ou ADMIN
+>>>>>>> Stashed changes
   createdAt  DateTime  @default(now())
   updatedAt  DateTime  @updatedAt
 
-  vehicles         Vehicle[]
+  vehicles         Vehicle[] @relation("ClientVehicles")
   reservations     Reservation[]
   messagesSent     Message[] @relation("SentMessages")
   messagesReceived Message[] @relation("ReceivedMessages")
   favorites        Favorite[]
+<<<<<<< Updated upstream
+=======
+  parking          Parking?  @relation("ParkingManager") // Relation nommée pour clarté
+
+  @@unique([verificationToken])
+  @@unique([passwordResetToken])
+>>>>>>> Stashed changes
+}
+
+model Parking {
+  id               Int       @id @default(autoincrement())
+  userId           Int       @unique
+  user             User      @relation("ParkingManager", fields: [userId], references: [id])
+  name             String
+  address          String
+  phone            String?   // Numéro spécifique au parking (optionnel)
+  description      String?
+  capacity         Int
+  hoursOfOperation String?   // Exemple : "08:00 - 18:00"
+  status           ParkingStatus @default(ACTIVE)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  vehicles    Vehicle[] @relation("ParkingVehicles")
 }
 
 model Vehicle {
-  id            Int              @id @default(autoincrement())
-  parkingId     Int
-  parking       User             @relation(fields: [parkingId], references: [id])
+  id            Int       @id @default(autoincrement())
+  userOwnerId   Int?      // Lien vers un client (si role = CLIENT)
+  parkingId     Int?      // Lien vers un parking
+  userOwner     User?     @relation("ClientVehicles", fields: [userOwnerId], references: [id])
+  parking       Parking?  @relation("ParkingVehicles", fields: [parkingId], references: [id])
+  
   marque        String
   prix          Float
   description   String
-  photos        String[]         // URLs des photos (Cloudinary)
+  photos        String[]
   garantie      Boolean
   dureeGarantie Int?
-  documents     String[]         // URLs des documents
+  documents     String[]  // URLs des documents généraux
   chauffeur     Boolean
-  createdAt     DateTime         @default(now())
-  updatedAt     DateTime         @updatedAt
+  assurance     String?   // URL ou identifiant du document d'assurance
+  dureeAssurance Int?     // Durée de validité de l'assurance en mois
+  carteGrise    String?   // URL ou identifiant de la carte grise
+  vignette      String?   // URL ou identifiant de la vignette
+  status        VehicleStatus @default(DISPONIBLE)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
   reservations  Reservation[]
   stats         VehicleStats?
   history       VehicleHistory[]
   favorites     Favorite[]
+
+  @@index([userOwnerId])
+  @@index([parkingId])
+  // @@constraint([userOwnerId, parkingId]) // Non supporté nativement, à gérer en code
 }
 
 model Reservation {
@@ -83,7 +129,7 @@ model VehicleHistory {
   id        Int      @id @default(autoincrement())
   vehicleId Int
   vehicle   Vehicle  @relation(fields: [vehicleId], references: [id])
-  changes   String   // Détails des modifications
+  changes   String
   createdAt DateTime @default(now())
 }
 
@@ -110,7 +156,19 @@ enum Status {
   REJECTED
 }
 
+enum ParkingStatus {
+  ACTIVE
+  INACTIVE
+}
+
 enum ReservationType {
   ACHAT
   LOCATION
+}
+
+enum VehicleStatus {
+  DISPONIBLE
+  EN_LOCATION
+  ACHETE
+  EN_MAINTENANCE
 }
