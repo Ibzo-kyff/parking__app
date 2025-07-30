@@ -25,13 +25,13 @@ const transporter = nodemailer.createTransport({
 const registerSchema = z.object({
   email: z.string().email(),
   password: z.string().min(6),
-  phone: z.string().optional(),
+  phone: z.string().min(8).max(15), // validation basique pour un numéro de téléphone
   role: z.nativeEnum(Role),
 });
 
 const loginSchema = z.object({
   email: z.string().email(),
-  password: z.string().min(6),
+  password: z.string().min(6), // Obligatoire
 });
 
 export const register = async (req: Request, res: Response) => {
@@ -40,7 +40,7 @@ export const register = async (req: Request, res: Response) => {
 
     const existing = await prisma.user.findFirst({
       where: {
-        OR: [{ email: data.email }, { phone: data.phone || '' }],
+        OR: [{ email: data.email }, { phone: data.phone }],
       },
     });
 
@@ -56,39 +56,38 @@ export const register = async (req: Request, res: Response) => {
         password: hashedPassword,
         phone: data.phone,
         role: data.role,
-        status: Status.PENDING,
+        status: data.role === 'PARKING' || data.role === 'ADMIN' ? Status.PENDING : undefined,
       },
     });
 
-    // Génération du token de vérification et expiration
-    const verificationToken = crypto.randomBytes(32).toString('hex');
-    const verificationTokenExpires = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24h
+    // Génération du token de vérification et expiration si email non vérifié
+    if (!user.emailVerified) {
+      const verificationToken = crypto.randomBytes(32).toString('hex');
+      const verificationTokenExpires = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24h
 
-    // Génération des tokens JWT
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { verificationToken, verificationTokenExpires },
+      });
+
+      const verificationUrl = `${process.env.FRONTEND_URL}/verify-email/${verificationToken}`;
+      const mailOptions = {
+        to: data.email,
+        subject: 'Vérification de votre email',
+        html: `Cliquez <a href="${verificationUrl}">ici</a> pour vérifier votre email. Ce lien expire dans 24 heures.`,
+      };
+
+      await transporter.sendMail(mailOptions);
+    }
+
     const accessToken = generateAccessToken({ id: user.id, email: user.email, role: user.role });
-    const refreshToken = generateRefreshToken({ id: user.id, email: user.email });
+    const refreshToken = generateRefreshToken({ id: user.id, email: user.email, role: user.role });
 
-    // Mise à jour unique avec tous les champs
     await prisma.user.update({
       where: { id: user.id },
-      data: {
-        verificationToken,
-        verificationTokenExpires,
-        refreshToken,
-      },
+      data: { refreshToken },
     });
 
-    // Envoi de l'email de vérification
-    const verificationUrl = `${process.env.FRONTEND_URL}/verify-email/${verificationToken}`;
-    const mailOptions = {
-      to: data.email,
-      subject: 'Vérification de votre email',
-      html: `Cliquez <a href="${verificationUrl}">ici</a> pour vérifier votre email. Ce lien expire dans 24 heures.`,
-    };
-
-    await transporter.sendMail(mailOptions);
-
-    // Stockage du cookie
     res.cookie('refreshToken', refreshToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production', // Activer en production avec HTTPS
@@ -120,8 +119,13 @@ export const login = async (req: Request, res: Response) => {
       return res.status(401).json({ message: 'Email ou mot de passe incorrect.' });
     }
 
+    // Vérification du statut
+    if (user.status === Status.PENDING) {
+      return res.status(403).json({ message: 'Compte en attente d\'approbation.' });
+    }
+
     const accessToken = generateAccessToken({ id: user.id, email: user.email, role: user.role });
-    const refreshToken = generateRefreshToken({ id: user.id, email: user.email });
+    const refreshToken = generateRefreshToken({ id: user.id, email: user.email, role: user.role });
 
     await prisma.user.update({
       where: { id: user.id },
@@ -152,25 +156,17 @@ export const refreshTokenHandler = async (req: Request, res: Response) => {
   }
 
   try {
-    const decoded = jwt.verify(refreshToken, process.env.REFRESH_TOKEN_SECRET as string) as { id: number };
+    const decoded = jwt.verify(refreshToken, process.env.REFRESH_TOKEN_SECRET as string) as { id: number; email: string; role: string };
     const user = await prisma.user.findUnique({
       where: { id: decoded.id, refreshToken },
     });
 
-    if (!user) {
-      return res.status(403).json({ message: 'Invalid refresh token' });
+    if (!user || user.status === Status.PENDING) {
+      return res.status(403).json({ message: 'Invalid refresh token or account pending' });
     }
 
-    const newAccessToken = generateAccessToken({ 
-      id: user.id, 
-      email: user.email, 
-      role: user.role 
-    });
-
-    const newRefreshToken = generateRefreshToken({ 
-      id: user.id, 
-      email: user.email 
-    });
+    const newAccessToken = generateAccessToken({ id: user.id, email: user.email, role: user.role });
+    const newRefreshToken = generateRefreshToken({ id: user.id, email: user.email, role: user.role });
 
     await prisma.user.update({
       where: { id: user.id },
@@ -225,7 +221,6 @@ export const sendVerificationEmail = async (req: AuthRequest, res: Response) => 
   });
 
   const verificationUrl = `${process.env.FRONTEND_URL}/verify-email/${token}`;
-
   const mailOptions = {
     to: req.user.email,
     subject: 'Vérification de votre email',
@@ -283,7 +278,6 @@ export const forgotPassword = async (req: Request, res: Response) => {
   });
 
   const resetUrl = `${process.env.FRONTEND_URL}/reset-password/${token}`;
-
   const mailOptions = {
     to: user.email,
     subject: 'Réinitialisation de votre mot de passe',
