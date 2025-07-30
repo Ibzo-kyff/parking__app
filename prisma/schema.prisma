@@ -10,16 +10,16 @@ datasource db {
 model User {
   id                   Int       @id @default(autoincrement())
   email                String    @unique
-  phone                String?   @unique
+  phone                String   @unique
   role                 Role      @default(CLIENT)
-  password             String?
+  password             String
   refreshToken         String?
   emailVerified        Boolean   @default(false)
   verificationToken    String?
   verificationTokenExpires DateTime?
   passwordResetToken   String?
   passwordResetExpires DateTime?
-  status               Status?   @default(PENDING) // Utilisé uniquement pour PARKING ou ADMIN
+  status               Status   @default(PENDING) // Utilisé uniquement pour PARKING ou ADMIN
   createdAt            DateTime  @default(now())
   updatedAt            DateTime  @updatedAt
 

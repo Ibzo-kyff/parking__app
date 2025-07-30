@@ -7,7 +7,7 @@ const router = express.Router();
 router.post('/register', register);
 router.post('/login', login);
 router.post('/logout', authenticateToken, logout);
-router.post('/refresh', authenticateToken, refreshTokenHandler); // Corriger ici
+router.post('/refresh', refreshTokenHandler); 
 router.post('/send-verification', authenticateToken, sendVerificationEmail);
 router.get('/verify-email/:token', verifyEmail);
 router.post('/forgot-password', forgotPassword);
