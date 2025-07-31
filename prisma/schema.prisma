@@ -56,7 +56,7 @@ model Vehicle {
   id                   Int       @id @default(autoincrement())
   userOwnerId         Int?      // Lien vers un client (si role = CLIENT)
   parkingId           Int?      // Lien vers un parking
-  userOwner           User?     @relation("ClientVehicles", fields: [userOwnerId], references: [id])
+  userOwner   User? @relation("ClientVehicles", fields: [userOwnerId], references: [id])
   parking             Parking?  @relation("ParkingVehicles", fields: [parkingId], references: [id])
   
   marque              String
