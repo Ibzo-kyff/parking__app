@@ -4,7 +4,7 @@ import { PrismaClient, Status } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
-interface AuthRequest extends Request {
+export interface AuthRequest extends Request {
   user?: { id: number; email: string; role: string }; // Typage précis basé sur le payload
 }
 

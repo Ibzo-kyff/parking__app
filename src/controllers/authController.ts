@@ -25,13 +25,22 @@ const transporter = nodemailer.createTransport({
 const registerSchema = z.object({
   email: z.string().email(),
   password: z.string().min(6),
-  phone: z.string().min(8).max(15), // validation basique pour un numéro de téléphone
+  phone: z.string().min(8).max(15),
   role: z.nativeEnum(Role),
 });
 
 const loginSchema = z.object({
   email: z.string().email(),
-  password: z.string().min(6), // Obligatoire
+  password: z.string().min(6),
+});
+
+const updateUserSchema = z.object({
+  email: z.string().email().optional(),
+  phone: z.string().min(8).max(15).optional(),
+  role: z.nativeEnum(Role).optional(),
+  status: z.nativeEnum(Status).optional(),
+  emailVerified: z.boolean().optional(),
+  password: z.string().min(6).optional(),
 });
 
 export const register = async (req: Request, res: Response) => {
@@ -39,9 +48,7 @@ export const register = async (req: Request, res: Response) => {
     const data = registerSchema.parse(req.body);
 
     const existing = await prisma.user.findFirst({
-      where: {
-        OR: [{ email: data.email }, { phone: data.phone }],
-      },
+      where: { OR: [{ email: data.email }, { phone: data.phone }] },
     });
 
     if (existing) {
@@ -56,14 +63,13 @@ export const register = async (req: Request, res: Response) => {
         password: hashedPassword,
         phone: data.phone,
         role: data.role,
-        status: data.role === 'PARKING' || data.role === 'ADMIN' ? Status.PENDING : undefined,
+        status: data.role === 'CLIENT' ? Status.APPROVED : Status.PENDING,
       },
     });
 
-    // Génération du token de vérification et expiration si email non vérifié
     if (!user.emailVerified) {
       const verificationToken = crypto.randomBytes(32).toString('hex');
-      const verificationTokenExpires = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24h
+      const verificationTokenExpires = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
       await prisma.user.update({
         where: { id: user.id },
@@ -90,13 +96,13 @@ export const register = async (req: Request, res: Response) => {
 
     res.cookie('refreshToken', refreshToken, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production', // Activer en production avec HTTPS
+      secure: process.env.NODE_ENV === 'production',
       sameSite: 'strict',
-      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 jours
+      maxAge: 7 * 24 * 60 * 60 * 1000,
     });
 
     return res.status(201).json({ message: 'Inscription réussie', accessToken });
-  } catch (err) {
+  } catch (err: unknown) {
     console.error(err);
     if (err instanceof z.ZodError) {
       return res.status(400).json({ message: 'Données invalides', errors: err.issues });
@@ -119,7 +125,6 @@ export const login = async (req: Request, res: Response) => {
       return res.status(401).json({ message: 'Email ou mot de passe incorrect.' });
     }
 
-    // Vérification du statut
     if (user.status === Status.PENDING) {
       return res.status(403).json({ message: 'Compte en attente d\'approbation.' });
     }
@@ -140,7 +145,7 @@ export const login = async (req: Request, res: Response) => {
     });
 
     return res.status(200).json({ message: 'Connexion réussie', accessToken });
-  } catch (err) {
+  } catch (err: unknown) {
     console.error(err);
     if (err instanceof z.ZodError) {
       return res.status(400).json({ message: 'Données invalides', errors: err.issues });
@@ -181,7 +186,7 @@ export const refreshTokenHandler = async (req: Request, res: Response) => {
     });
 
     return res.json({ accessToken: newAccessToken });
-  } catch (err) {
+  } catch (err: unknown) {
     return res.status(403).json({ message: 'Invalid refresh token' });
   }
 };
@@ -200,7 +205,7 @@ export const logout = async (req: Request, res: Response) => {
     }
     res.clearCookie('refreshToken');
     return res.status(200).json({ message: 'Déconnexion réussie' });
-  } catch (err) {
+  } catch (err: unknown) {
     console.error(err);
     return res.status(500).json({ message: 'Erreur serveur' });
   }
@@ -209,112 +214,265 @@ export const logout = async (req: Request, res: Response) => {
 export const sendVerificationEmail = async (req: AuthRequest, res: Response) => {
   if (!req.user) return res.status(401).send();
 
-  const token = crypto.randomBytes(32).toString('hex');
-  const expires = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24h
+  try {
+    const token = crypto.randomBytes(32).toString('hex');
+    const expires = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
-  await prisma.user.update({
-    where: { id: req.user.id },
-    data: {
-      verificationToken: token,
-      verificationTokenExpires: expires,
-    },
-  });
+    await prisma.user.update({
+      where: { id: req.user.id },
+      data: {
+        verificationToken: token,
+        verificationTokenExpires: expires,
+      },
+    });
 
-  const verificationUrl = `${process.env.FRONTEND_URL}/verify-email/${token}`;
-  const mailOptions = {
-    to: req.user.email,
-    subject: 'Vérification de votre email',
-    html: `Cliquez <a href="${verificationUrl}">ici</a> pour vérifier votre email.`,
-  };
+    const verificationUrl = `${process.env.FRONTEND_URL}/verify-email/${token}`;
+    const mailOptions = {
+      to: req.user.email,
+      subject: 'Vérification de votre email',
+      html: `Cliquez <a href="${verificationUrl}">ici</a> pour vérifier votre email.`,
+    };
 
-  await transporter.sendMail(mailOptions);
+    await transporter.sendMail(mailOptions);
 
-  res.json({ message: 'Email de vérification envoyé' });
+    res.json({ message: 'Email de vérification envoyé' });
+  } catch (err: unknown) {
+    console.error(err);
+    return res.status(500).json({ message: 'Erreur lors de l\'envoi de l\'email de vérification' });
+  }
 };
 
 export const verifyEmail = async (req: Request, res: Response) => {
-  const { token } = req.params;
+  try {
+    const { token } = req.params;
 
-  const user = await prisma.user.findFirst({
-    where: {
-      verificationToken: token,
-      verificationTokenExpires: { gt: new Date() },
-    },
-  });
+    const user = await prisma.user.findFirst({
+      where: {
+        verificationToken: token,
+        verificationTokenExpires: { gt: new Date() },
+      },
+    });
 
-  if (!user) {
-    return res.status(400).json({ message: 'Token invalide ou expiré' });
+    if (!user) {
+      return res.status(400).json({ message: 'Token invalide ou expiré' });
+    }
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        emailVerified: true,
+        verificationToken: null,
+        verificationTokenExpires: null,
+      },
+    });
+
+    res.json({ message: 'Email vérifié avec succès' });
+  } catch (err: unknown) {
+    console.error(err);
+    return res.status(500).json({ message: 'Erreur serveur' });
   }
-
-  await prisma.user.update({
-    where: { id: user.id },
-    data: {
-      emailVerified: true,
-      verificationToken: null,
-      verificationTokenExpires: null,
-    },
-  });
-
-  res.json({ message: 'Email vérifié avec succès' });
 };
 
 export const forgotPassword = async (req: Request, res: Response) => {
-  const { email } = req.body;
+  try {
+    const { email } = req.body;
 
-  const user = await prisma.user.findUnique({ where: { email } });
-  if (!user) {
-    return res.json({ message: 'Si cet email existe, un lien de réinitialisation a été envoyé' });
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (!user) {
+      return res.json({ message: 'Si cet email existe, un lien de réinitialisation a été envoyé' });
+    }
+
+    const token = crypto.randomBytes(32).toString('hex');
+    const expires = new Date(Date.now() + 60 * 60 * 1000);
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        passwordResetToken: token,
+        passwordResetExpires: expires,
+      },
+    });
+
+    const resetUrl = `${process.env.FRONTEND_URL}/reset-password/${token}`;
+    const mailOptions = {
+      to: user.email,
+      subject: 'Réinitialisation de votre mot de passe',
+      html: `Cliquez <a href="${resetUrl}">ici</a> pour réinitialiser votre mot de passe.`,
+    };
+
+    await transporter.sendMail(mailOptions);
+
+    res.json({ message: 'Lien de réinitialisation envoyé' });
+  } catch (err: unknown) {
+    console.error(err);
+    return res.status(500).json({ message: 'Erreur lors de l\'envoi du lien de réinitialisation' });
   }
-
-  const token = crypto.randomBytes(32).toString('hex');
-  const expires = new Date(Date.now() + 60 * 60 * 1000); // 1h
-
-  await prisma.user.update({
-    where: { id: user.id },
-    data: {
-      passwordResetToken: token,
-      passwordResetExpires: expires,
-    },
-  });
-
-  const resetUrl = `${process.env.FRONTEND_URL}/reset-password/${token}`;
-  const mailOptions = {
-    to: user.email,
-    subject: 'Réinitialisation de votre mot de passe',
-    html: `Cliquez <a href="${resetUrl}">ici</a> pour réinitialiser votre mot de passe.`,
-  };
-
-  await transporter.sendMail(mailOptions);
-
-  res.json({ message: 'Lien de réinitialisation envoyé' });
 };
 
 export const resetPassword = async (req: Request, res: Response) => {
-  const { token } = req.params;
-  const { password } = req.body;
+  try {
+    const { token } = req.params;
+    const { password } = req.body;
 
-  const user = await prisma.user.findFirst({
-    where: {
-      passwordResetToken: token,
-      passwordResetExpires: { gt: new Date() },
-    },
-  });
+    const user = await prisma.user.findFirst({
+      where: {
+        passwordResetToken: token,
+        passwordResetExpires: { gt: new Date() },
+      },
+    });
 
-  if (!user) {
-    return res.status(400).json({ message: 'Token invalide ou expiré' });
+    if (!user) {
+      return res.status(400).json({ message: 'Token invalide ou expiré' });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        password: hashedPassword,
+        passwordResetToken: null,
+        passwordResetExpires: null,
+        refreshToken: null,
+      },
+    });
+
+    res.json({ message: 'Mot de passe réinitialisé avec succès' });
+  } catch (err: unknown) {
+    console.error(err);
+    return res.status(500).json({ message: 'Erreur serveur' });
   }
+};
 
-  const hashedPassword = await bcrypt.hash(password, 10);
+// Nouvelles méthodes pour gérer les utilisateurs
+export const getAllUsers = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user || req.user.role !== 'ADMIN') {
+      return res.status(403).json({ message: 'Accès refusé. Seuls les administrateurs peuvent voir tous les utilisateurs.' });
+    }
 
-  await prisma.user.update({
-    where: { id: user.id },
-    data: {
-      password: hashedPassword,
-      passwordResetToken: null,
-      passwordResetExpires: null,
-      refreshToken: null, // Invalider toutes les sessions
-    },
-  });
+    const users = await prisma.user.findMany({
+      select: {
+        id: true,
+        email: true,
+        phone: true,
+        role: true,
+        status: true,
+        emailVerified: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
 
-  res.json({ message: 'Mot de passe réinitialisé avec succès' });
+    return res.status(200).json(users);
+  } catch (err: unknown) {
+    console.error(err);
+    return res.status(500).json({ message: 'Erreur serveur' });
+  }
+};
+
+export const getUserById = async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = parseInt(req.params.id);
+    if (isNaN(userId)) {
+      return res.status(400).json({ message: 'ID invalide' });
+    }
+
+    if (!req.user || (req.user.role !== 'ADMIN' && req.user.id !== userId)) {
+      return res.status(403).json({ message: 'Accès refusé. Seuls les administrateurs ou le propriétaire peuvent voir cet utilisateur.' });
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        email: true,
+        phone: true,
+        role: true,
+        status: true,
+        emailVerified: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+
+    if (!user) {
+      return res.status(404).json({ message: 'Utilisateur non trouvé' });
+    }
+
+    return res.status(200).json(user);
+  } catch (err: unknown) {
+    console.error(err);
+    return res.status(500).json({ message: 'Erreur serveur' });
+  }
+};
+
+export const updateUser = async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = parseInt(req.params.id);
+    if (isNaN(userId)) {
+      return res.status(400).json({ message: 'ID invalide' });
+    }
+
+    if (!req.user || (req.user.role !== 'ADMIN' && req.user.id !== userId)) {
+      return res.status(403).json({ message: 'Accès refusé. Seuls les administrateurs ou le propriétaire peuvent modifier cet utilisateur.' });
+    }
+
+    const data = updateUserSchema.parse(req.body);
+
+    // Restreindre la modification de role et status aux admins
+    if (req.user.role !== 'ADMIN' && (data.role || data.status)) {
+      return res.status(403).json({ message: 'Seuls les administrateurs peuvent modifier le rôle ou le statut.' });
+    }
+
+    const hashedPassword = data.password ? await bcrypt.hash(data.password, 10) : undefined;
+
+    const updatedUser = await prisma.user.update({
+      where: { id: userId },
+      data: {
+        email: data.email,
+        phone: data.phone,
+        role: data.role,
+        status: data.status,
+        emailVerified: data.emailVerified,
+        password: hashedPassword,
+      },
+    });
+
+    return res.status(200).json({ message: 'Utilisateur mis à jour avec succès', user: updatedUser });
+  } catch (err: unknown) {
+    console.error(err);
+    if (err instanceof z.ZodError) {
+      return res.status(400).json({ message: 'Données invalides', errors: err.issues });
+    } else if (err instanceof Error && 'code' in err && err.code === 'P2025') {
+      return res.status(404).json({ message: 'Utilisateur non trouvé' });
+    }
+    return res.status(500).json({ message: 'Erreur serveur' });
+  }
+};
+
+export const deleteUser = async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = parseInt(req.params.id);
+    if (isNaN(userId)) {
+      return res.status(400).json({ message: 'ID invalide' });
+    }
+
+    // Autoriser la suppression par l'utilisateur lui-même ou un ADMIN
+    if (!req.user || (req.user.role !== 'ADMIN' && req.user.id !== userId)) {
+      return res.status(403).json({ message: 'Accès refusé. Seuls les administrateurs ou le propriétaire peuvent supprimer cet utilisateur.' });
+    }
+
+    await prisma.user.delete({
+      where: { id: userId },
+    });
+
+    return res.status(200).json({ message: 'Utilisateur supprimé avec succès' });
+  } catch (err: unknown) {
+    console.error(err);
+    if (err instanceof Error && 'code' in err && err.code === 'P2025') {
+      return res.status(404).json({ message: 'Utilisateur non trouvé' });
+    }
+    return res.status(500).json({ message: 'Erreur serveur' });
+  }
 };

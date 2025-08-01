@@ -4,6 +4,7 @@ import { PrismaClient } from '@prisma/client';
 import cookieParser from 'cookie-parser';
 import vehiculeRoutes from './routes/vehiculeRoutes';
 import parkingRoutes from './routes/parkingRoutes';
+import reservationRoutes from './routes/reservation.route';
 const app = express();
 const prisma = new PrismaClient();
 
@@ -13,7 +14,7 @@ app.use(cookieParser());
 app.use('/api/auth', authRoutes);
 app.use('/api/vehicules', vehiculeRoutes);
 app.use('/api/parkings', parkingRoutes);
-
+app.use('/api/reservations', reservationRoutes);
 const PORT = process.env.PORT || 5000;
 
 app.listen(PORT, async () => {
