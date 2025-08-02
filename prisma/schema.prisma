@@ -12,6 +12,10 @@ model User {
   email                String    @unique
   phone                String   @unique
   role                 Role      @default(CLIENT)
+  image                String?   // URL de l'image de profil, optionnelle
+  address              String?
+  nom                  String    @default("Inconnu") // Valeur par défaut
+  prenom               String    @default("Inconnu")
   password             String
   refreshToken         String?
   emailVerified        Boolean   @default(false)

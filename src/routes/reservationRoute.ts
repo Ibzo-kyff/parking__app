@@ -6,7 +6,7 @@ import {
   getReservation,
   cancelReservation,
   updateReservation,
-} from '../controllers/reservation.controller';
+} from '../controllers/reservationController';
 import { authenticateToken } from '../middleware/authMiddleware';
 
 const router = express.Router();
