@@ -7,12 +7,17 @@ import {
   deleteVehicule
 } from '../controllers/vehicule.controller';
 
+import { authenticateToken } from '../middleware/authMiddleware';
+
 const router = Router();
 
-router.post('/', createVehicule);
+// Routes publiques (lecture)
 router.get('/', getAllVehicules);
 router.get('/:id', getVehiculeById);
-router.put('/:id', updateVehicule);
-router.delete('/:id', deleteVehicule);
+
+// Routes protégées (création, modification, suppression)
+router.post('/', authenticateToken, createVehicule);
+router.put('/:id', authenticateToken, updateVehicule);
+router.delete('/:id', authenticateToken, deleteVehicule);
 
 export default router;
