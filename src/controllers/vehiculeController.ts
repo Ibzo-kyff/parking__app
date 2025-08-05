@@ -9,17 +9,20 @@ export const createVehicule = async (req: Request, res: Response) => {
     userOwnerId,
     parkingId,
     marque,
+    model,
     prix,
     description,
-    photos,
-    garantie,
+    photos = [],
+    garantie = false,
     dureeGarantie,
-    documents,
-    chauffeur,
+    documents = [],
+    chauffeur = false, // Valeur par défaut true
     assurance,
     dureeAssurance,
     carteGrise,
-    vignette
+    vignette,
+    fuelType,
+    mileage
   } = req.body;
 
   // 🚫 Un seul des deux doit être fourni
@@ -48,18 +51,21 @@ export const createVehicule = async (req: Request, res: Response) => {
 
     // Construction dynamique de l'objet data
     const vehiculeData: any = {
-      marque,
-      prix,
-      description,
-      photos,
-      garantie,
-      dureeGarantie,
-      documents,
-      chauffeur,
-      assurance,
-      dureeAssurance,
-      carteGrise,
-      vignette
+        marque,
+        model,
+        prix: Number(prix),
+        description,
+        photos,
+        garantie,
+        dureeGarantie: dureeGarantie ? Number(dureeGarantie) : null,
+        documents,
+        chauffeur, // Utilise la valeur fournie ou true par défaut
+        assurance,
+        dureeAssurance: dureeAssurance ? Number(dureeAssurance) : null,
+        carteGrise,
+        vignette,
+        fuelType,
+        mileage: mileage ? Number(mileage) : null,
     };
 
     if (userOwnerId) vehiculeData.userOwnerId = userOwnerId;

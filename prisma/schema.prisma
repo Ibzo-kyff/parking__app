@@ -28,6 +28,7 @@ model User {
   messagesSent         Message[] @relation("SentMessages")
   messagesReceived     Message[] @relation("ReceivedMessages")
   favorites            Favorite[]
+  notifications        Notification[] @relation("UserNotifications")
 
   parking              Parking?  @relation("ParkingManager") // Relation nommée pour clarté
 
@@ -48,7 +49,11 @@ model Parking {
   status               ParkingStatus @default(ACTIVE)
   createdAt            DateTime  @default(now())
   updatedAt            DateTime  @updatedAt
+  logo                 String?   // URL du logo/image du parking
+  city                 String    // Ville du parking
+  email                String    // Email spécifique du parking
 
+  notifications        Notification[] @relation("ParkingNotifications")
   vehicles             Vehicle[] @relation("ParkingVehicles")
 }
 
@@ -60,6 +65,7 @@ model Vehicle {
   parking             Parking?  @relation("ParkingVehicles", fields: [parkingId], references: [id])
   
   marque              String
+  model               String    // Modèle du véhicule (ex: Clio, D10)
   prix                Float
   description         String
   photos              String[]
@@ -74,6 +80,8 @@ model Vehicle {
   status              VehicleStatus @default(DISPONIBLE)
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
+  fuelType            FuelType  // Type de carburant (essence, diesel, etc.)
+  mileage             Int?      // Kilométrage du véhicule
 
   reservations        Reservation[]
   stats               VehicleStats?
@@ -125,6 +133,19 @@ model VehicleHistory {
   changes              String
   createdAt            DateTime @default(now())
 }
+model Notification {
+  id                   Int            @id @default(autoincrement())
+  userId               Int?           // Pour les notifications utilisateur
+  parkingId            Int?           // Pour les notifications parking
+  title                String
+  message              String
+  type                 NotificationType
+  read                 Boolean        @default(false)
+  createdAt            DateTime       @default(now())
+
+  user                 User?          @relation("UserNotifications", fields: [userId], references: [id])
+  parking              Parking?       @relation("ParkingNotifications", fields: [parkingId], references: [id])
+}
 
 model Favorite {
   id                   Int      @id @default(autoincrement())
@@ -164,4 +185,22 @@ enum VehicleStatus {
   EN_LOCATION
   ACHETE
   EN_MAINTENANCE
+  INDISPONIBLE  // Nouveau statut ajouté
+}
+
+enum FuelType {
+  ESSENCE
+  DIESEL
+  ELECTRIQUE
+  HYBRIDE
+  GPL
+  AUTRE
+}
+
+enum NotificationType {
+  RESERVATION
+  MESSAGE
+  SYSTEM
+  ALERT
+  PROMOTION
 }

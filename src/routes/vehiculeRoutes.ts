@@ -5,7 +5,7 @@ import {
   getVehiculeById,
   updateVehicule,
   deleteVehicule
-} from '../controllers/vehicule.controller';
+} from '../controllers/vehiculeController';
 
 const router = Router();
 

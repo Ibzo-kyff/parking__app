@@ -10,6 +10,8 @@ export const createParking = async (req: Request, res: Response) => {
     name,
     address,
     phone,
+    email,
+    city, 
     description,
     capacity,
     hoursOfOperation,
@@ -22,7 +24,9 @@ export const createParking = async (req: Request, res: Response) => {
     if (!user || user.role !== Role.PARKING) {
       return res.status(400).json({ error: "Utilisateur invalide ou non autorisé à gérer un parking." });
     }
-
+     if (!city) {
+      return res.status(400).json({ error: "Le champ 'city' est requis" });
+    }
     // Vérifie qu'un parking n'existe pas déjà pour cet utilisateur
     const existingParking = await prisma.parking.findUnique({ where: { userId } });
     if (existingParking) {
@@ -35,6 +39,8 @@ export const createParking = async (req: Request, res: Response) => {
         name,
         address,
         phone,
+        city, 
+        email,
         description,
         capacity,
         hoursOfOperation,
@@ -85,6 +91,8 @@ export const updateParking = async (req: Request, res: Response) => {
     name,
     address,
     phone,
+    city,
+    email,
     description,
     capacity,
     hoursOfOperation,
@@ -98,6 +106,8 @@ export const updateParking = async (req: Request, res: Response) => {
         name,
         address,
         phone,
+        city,
+        email,
         description,
         capacity,
         hoursOfOperation,
