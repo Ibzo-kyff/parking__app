@@ -5,7 +5,7 @@ import {
   getParkingById,
   updateParking,
   deleteParking
-} from '../controllers/parking.controller';
+} from '../controllers/parkingController';
 
 const router = express.Router();
 
