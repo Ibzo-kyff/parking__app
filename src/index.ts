@@ -18,11 +18,6 @@ app.use('/api/parkings', parkingRoutes);
 app.use('/api/reservations', reservationRoutes);
 app.use('/api/notifications', notificationRoutes);
 
-// Gestion des 404
-app.use('/api/*', (req, res) => {
-  res.status(404).json({ error: 'Endpoint non trouvé' });
-});
-
 const PORT = process.env.PORT || 5000;
 
 app.listen(PORT, async () => {
