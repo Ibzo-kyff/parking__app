@@ -1,6 +1,8 @@
 import { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { Role, Status } from '@prisma/client';
+import multer from 'multer';
+import path from 'path';
 
 const registerSchema = z.object({
   email: z.string().email(),
@@ -31,3 +33,25 @@ export const validateLogin = (req: Request, res: Response, next: NextFunction) =
   }
   next();
 };
+
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, path.join(__dirname, '../../public'));
+  },
+  filename: function (req, file, cb) {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, uniqueSuffix + '-' + file.originalname.replace(/\s+/g, '_'));
+  }
+});
+
+export const upload = multer({
+  storage: storage,
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype.startsWith('image/')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Seules les images sont autorisées !'));
+    }
+  },
+  limits: { fileSize: 5 * 1024 * 1024 } // 5 Mo max
+});

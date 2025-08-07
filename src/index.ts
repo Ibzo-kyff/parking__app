@@ -1,4 +1,5 @@
 import express from 'express';
+import path from 'path';
 import authRoutes from './routes/authRoutes';
 import { PrismaClient } from '@prisma/client';
 import cookieParser from 'cookie-parser';
@@ -11,6 +12,8 @@ const prisma = new PrismaClient();
 
 app.use(express.json());
 app.use(cookieParser());
+// Ajout pour servir le dossier public
+app.use('/public', express.static(path.join(__dirname, '../public')));
 
 app.use('/api/auth', authRoutes);
 app.use('/api/vehicules', vehiculeRoutes);
