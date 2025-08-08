@@ -7,6 +7,7 @@ import vehiculeRoutes from './routes/vehiculeRoutes';
 import parkingRoutes from './routes/parkingRoutes';
 import reservationRoutes from './routes/reservationRoute';
 import notificationRoutes from './routes/notificationRoute';
+import multer from 'multer';
 const app = express();
 const prisma = new PrismaClient();
 
@@ -14,12 +15,28 @@ app.use(express.json());
 app.use(cookieParser());
 // Ajout pour servir le dossier public
 app.use('/public', express.static(path.join(__dirname, '../public')));
+// Ajout pour servir les dossiers statiques
+app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
 app.use('/api/auth', authRoutes);
 app.use('/api/vehicules', vehiculeRoutes);
 app.use('/api/parkings', parkingRoutes);
 app.use('/api/reservations', reservationRoutes);
 app.use('/api/notifications', notificationRoutes);
+
+// Middleware global d'erreurs (Multer + génériques)
+app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  if (err && typeof err === 'object' && 'name' in err && (err as any).name === 'MulterError') {
+    return res.status(400).json({
+      error: (err as any).message || 'Erreur upload',
+      hint: "Utilisez Body=form-data avec un champ 'image'/'logo' ou 'file' de type Fichier. Ne laissez pas le nom de champ vide."
+    });
+  }
+  if (err instanceof Error) {
+    return res.status(500).json({ error: err.message });
+  }
+  return res.status(500).json({ error: 'Erreur serveur' });
+});
 
 const PORT = process.env.PORT || 5000;
 

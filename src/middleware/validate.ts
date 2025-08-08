@@ -36,7 +36,7 @@ export const validateLogin = (req: Request, res: Response, next: NextFunction) =
 
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
-    cb(null, path.join(__dirname, '../../public'));
+    cb(null, path.join(__dirname, '../../uploads'));
   },
   filename: function (req, file, cb) {
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
@@ -53,5 +53,5 @@ export const upload = multer({
       cb(new Error('Seules les images sont autorisées !'));
     }
   },
-  limits: { fileSize: 5 * 1024 * 1024 } // 5 Mo max
+  limits: { fileSize: 5 * 1024 * 1024 }
 });
