@@ -40,7 +40,8 @@ const createParking = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                 description,
                 capacity,
                 hoursOfOperation,
-                status: status || client_1.ParkingStatus.ACTIVE
+                status: status || client_1.ParkingStatus.ACTIVE,
+                logo: req.body.logo || undefined
             }
         });
         return res.status(201).json({ message: 'Parking créé avec succès', parking: newParking });
@@ -87,10 +88,9 @@ const updateParking = (req, res) => __awaiter(void 0, void 0, void 0, function* 
     const { id } = req.params;
     const { name, address, phone, city, email, description, capacity, hoursOfOperation, status } = req.body;
     try {
-        const updated = yield prisma.parking.update({
+        const updatedParking = yield prisma.parking.update({
             where: { id: parseInt(id) },
-            data: {
-                name,
+            data: Object.assign({ name,
                 address,
                 phone,
                 city,
@@ -98,10 +98,9 @@ const updateParking = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                 description,
                 capacity,
                 hoursOfOperation,
-                status
-            }
+                status }, (req.body.logo && { logo: req.body.logo }))
         });
-        return res.json({ message: 'Parking mis à jour', parking: updated });
+        return res.json({ message: 'Parking mis à jour', parking: updatedParking });
     }
     catch (err) {
         return res.status(500).json({ error: 'Erreur lors de la mise à jour du parking' });

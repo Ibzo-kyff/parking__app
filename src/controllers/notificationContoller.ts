@@ -2,6 +2,8 @@ import { Request, Response } from 'express';
 import { PrismaClient, NotificationType } from '@prisma/client';
 import { z } from 'zod';
 
+console.log('DEBUG NotificationType:', NotificationType);
+
 const prisma = new PrismaClient();
 
 // Schéma de validation
