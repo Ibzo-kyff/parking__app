@@ -17,7 +17,6 @@ app.use(cookieParser());
 app.use('/public', express.static(path.join(__dirname, '../public')));
 // Ajout pour servir les dossiers statiques
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
-
 app.use('/api/auth', authRoutes);
 app.use('/api/vehicules', vehiculeRoutes);
 app.use('/api/parkings', parkingRoutes);
