@@ -156,7 +156,13 @@ export const login = async (req: Request, res: Response) => {
       maxAge: 7 * 24 * 60 * 60 * 1000,
     });
 
-    return res.status(200).json({ message: 'Connexion réussie', accessToken });
+    // Ajouter role et emailVerified à la réponse
+    return res.status(200).json({
+      message: 'Connexion réussie',
+      accessToken,
+      role: user.role,
+      emailVerified: user.emailVerified,
+    });
   } catch (err: unknown) {
     console.error(err);
     if (err instanceof z.ZodError) {
