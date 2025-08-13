@@ -9,7 +9,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.deleteVehicule = exports.updateVehicule = exports.getVehiculeById = exports.getAllVehicules = exports.createVehicule = void 0;
+exports.getRecentParkings = exports.getDistinctModels = exports.getDistinctMarques = exports.deleteVehicule = exports.updateVehicule = exports.getVehiculeById = exports.getAllVehicules = exports.createVehicule = void 0;
 const client_1 = require("@prisma/client");
 const prisma = new client_1.PrismaClient();
 // CREATE VEHICULE
@@ -74,10 +74,47 @@ const createVehicule = (req, res) => __awaiter(void 0, void 0, void 0, function*
     }
 });
 exports.createVehicule = createVehicule;
-// GET ALL VEHICULES
-const getAllVehicules = (_req, res) => __awaiter(void 0, void 0, void 0, function* () {
+// GET ALL VEHICULES WITH FILTERS
+const getAllVehicules = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    const { marque, model, minPrix, maxPrix, fuelType, maxMileage, withChauffeur, withGarantie, parkingId, userOwnerId, status } = req.query;
     try {
+        const where = {};
+        if (marque) {
+            where.marque = { contains: marque, mode: 'insensitive' };
+        }
+        if (model) {
+            where.model = { contains: model, mode: 'insensitive' };
+        }
+        if (minPrix || maxPrix) {
+            where.prix = {};
+            if (minPrix)
+                where.prix.gte = Number(minPrix);
+            if (maxPrix)
+                where.prix.lte = Number(maxPrix);
+        }
+        if (fuelType) {
+            where.fuelType = fuelType;
+        }
+        if (maxMileage) {
+            where.mileage = { lte: Number(maxMileage) };
+        }
+        if (withChauffeur !== undefined) {
+            where.chauffeur = withChauffeur === 'true';
+        }
+        if (withGarantie !== undefined) {
+            where.garantie = withGarantie === 'true';
+        }
+        if (parkingId) {
+            where.parkingId = Number(parkingId);
+        }
+        if (userOwnerId) {
+            where.userOwnerId = Number(userOwnerId);
+        }
+        if (status) {
+            where.status = status;
+        }
         const vehicules = yield prisma.vehicle.findMany({
+            where,
             include: {
                 parking: true,
                 userOwner: true,
@@ -159,3 +196,49 @@ const deleteVehicule = (req, res) => __awaiter(void 0, void 0, void 0, function*
     }
 });
 exports.deleteVehicule = deleteVehicule;
+// GET DISTINCT MARQUES
+const getDistinctMarques = (_req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const marques = yield prisma.vehicle.findMany({
+            select: { marque: true },
+            distinct: ['marque']
+        });
+        return res.json(marques.map((v) => v.marque));
+    }
+    catch (err) {
+        return res.status(500).json({ error: 'Erreur lors de la récupération des marques' });
+    }
+});
+exports.getDistinctMarques = getDistinctMarques;
+// GET DISTINCT MODELS
+const getDistinctModels = (_req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const models = yield prisma.vehicle.findMany({
+            select: { model: true },
+            distinct: ['model']
+        });
+        return res.json(models.map((v) => v.model));
+    }
+    catch (err) {
+        return res.status(500).json({ error: 'Erreur lors de la récupération des modèles' });
+    }
+});
+exports.getDistinctModels = getDistinctModels;
+// GET RECENT PARKINGS IMAGES (LAST 4 ADDED PARKINGS WITH THEIR PHOTOS/LOGOS)
+const getRecentParkings = (_req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const parkings = yield prisma.parking.findMany({
+            orderBy: { createdAt: 'desc' }, // Assumes parking has a createdAt field
+            take: 4,
+            select: {
+                id: true,
+                logo: true // Assumes parking has a 'photos' field similar to vehicles; adjust if it's 'logo' or another field
+            }
+        });
+        return res.json(parkings);
+    }
+    catch (err) {
+        return res.status(500).json({ error: 'Erreur lors de la récupération des parkings récents' });
+    }
+});
+exports.getRecentParkings = getRecentParkings;
