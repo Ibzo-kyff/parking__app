@@ -86,10 +86,69 @@ export const createVehicule = async (req: Request, res: Response) => {
   }
 };
 
-// GET ALL VEHICULES
-export const getAllVehicules = async (_req: Request, res: Response) => {
+// GET ALL VEHICULES WITH FILTERS
+export const getAllVehicules = async (req: Request, res: Response) => {
+  const {
+    marque,
+    model,
+    minPrix,
+    maxPrix,
+    fuelType,
+    maxMileage,
+    withChauffeur,
+    withGarantie,
+    parkingId,
+    userOwnerId,
+    status
+  } = req.query;
+
   try {
+    const where: any = {};
+
+    if (marque) {
+      where.marque = { contains: marque as string, mode: 'insensitive' };
+    }
+
+    if (model) {
+      where.model = { contains: model as string, mode: 'insensitive' };
+    }
+
+    if (minPrix || maxPrix) {
+      where.prix = {};
+      if (minPrix) where.prix.gte = Number(minPrix);
+      if (maxPrix) where.prix.lte = Number(maxPrix);
+    }
+
+    if (fuelType) {
+      where.fuelType = fuelType as string;
+    }
+
+    if (maxMileage) {
+      where.mileage = { lte: Number(maxMileage) };
+    }
+
+    if (withChauffeur !== undefined) {
+      where.chauffeur = withChauffeur === 'true';
+    }
+
+    if (withGarantie !== undefined) {
+      where.garantie = withGarantie === 'true';
+    }
+
+    if (parkingId) {
+      where.parkingId = Number(parkingId);
+    }
+
+    if (userOwnerId) {
+      where.userOwnerId = Number(userOwnerId);
+    }
+
+    if (status) {
+      where.status = status as string;
+    }
+
     const vehicules = await prisma.vehicle.findMany({
+      where,
       include: {
         parking: true,
         userOwner: true,
@@ -186,5 +245,48 @@ export const deleteVehicule = async (req: Request, res: Response) => {
     return res.json({ message: 'Véhicule supprimé avec succès' });
   } catch (err) {
     return res.status(500).json({ error: 'Erreur lors de la suppression du véhicule' });
+  }
+};
+
+// GET DISTINCT MARQUES
+export const getDistinctMarques = async (_req: Request, res: Response) => {
+  try {
+    const marques = await prisma.vehicle.findMany({
+      select: { marque: true },
+      distinct: ['marque']
+    });
+    return res.json(marques.map((v) => v.marque));
+  } catch (err) {
+    return res.status(500).json({ error: 'Erreur lors de la récupération des marques' });
+  }
+};
+
+// GET DISTINCT MODELS
+export const getDistinctModels = async (_req: Request, res: Response) => {
+  try {
+    const models = await prisma.vehicle.findMany({
+      select: { model: true },
+      distinct: ['model']
+    });
+    return res.json(models.map((v) => v.model));
+  } catch (err) {
+    return res.status(500).json({ error: 'Erreur lors de la récupération des modèles' });
+  }
+};
+
+// GET RECENT PARKINGS IMAGES (LAST 4 ADDED PARKINGS WITH THEIR PHOTOS/LOGOS)
+export const getRecentParkings = async (_req: Request, res: Response) => {
+  try {
+    const parkings = await prisma.parking.findMany({
+      orderBy: { createdAt: 'desc' }, // Assumes parking has a createdAt field
+      take: 4,
+      select: {
+        id: true,
+        logo: true // Assumes parking has a 'photos' field similar to vehicles; adjust if it's 'logo' or another field
+      }
+    });
+    return res.json(parkings);
+  } catch (err) {
+    return res.status(500).json({ error: 'Erreur lors de la récupération des parkings récents' });
   }
 };

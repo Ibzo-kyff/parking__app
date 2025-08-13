@@ -143,7 +143,13 @@ const login = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
             sameSite: 'strict',
             maxAge: 7 * 24 * 60 * 60 * 1000,
         });
-        return res.status(200).json({ message: 'Connexion réussie', accessToken });
+        // Ajouter role et emailVerified à la réponse
+        return res.status(200).json({
+            message: 'Connexion réussie',
+            accessToken,
+            role: user.role,
+            emailVerified: user.emailVerified,
+        });
     }
     catch (err) {
         console.error(err);

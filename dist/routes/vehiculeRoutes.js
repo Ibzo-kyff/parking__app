@@ -8,4 +8,7 @@ router.get('/', vehiculeController_1.getAllVehicules);
 router.get('/:id', vehiculeController_1.getVehiculeById);
 router.put('/:id', vehiculeController_1.updateVehicule);
 router.delete('/:id', vehiculeController_1.deleteVehicule);
+router.get('/marques', vehiculeController_1.getDistinctMarques);
+router.get('/models', vehiculeController_1.getDistinctModels);
+router.get('/recent-parkings', vehiculeController_1.getRecentParkings);
 exports.default = router;
