@@ -21,21 +21,62 @@ const transporter = nodemailer.createTransport({
   },
 });
 
-// Validation du corps de la requête
+// Fonction pour générer un OTP à 4 chiffres
+const generateOTP = () => {
+  return Math.floor(1000 + Math.random() * 9000).toString();
+};
+
+// Envoyer un OTP par email
+const sendOTPEmail = async (email: string, otp: string, purpose: 'reset' | 'verify') => {
+  try {
+    const subject = purpose === 'reset' 
+      ? 'Réinitialisation de votre mot de passe' 
+      : 'Vérification de votre email';
+    
+    const text = purpose === 'reset'
+      ? `Votre code OTP pour réinitialiser votre mot de passe est : ${otp}. Ce code expire dans 15 minutes.`
+      : `Votre code OTP pour vérifier votre email est : ${otp}. Ce code expire dans 15 minutes.`;
+
+    const mailOptions = {
+      to: email,
+      subject,
+      text,
+      html: `<p>Votre code OTP est : <strong>${otp}</strong>. Ce code expire dans 15 minutes.</p>`,
+    };
+
+    await transporter.sendMail(mailOptions);
+  } catch (error) {
+    console.error('Erreur lors de l\'envoi de l\'email OTP:', error);
+    throw new Error('Échec de l\'envoi de l\'email OTP');
+  }
+};
+
+// Validation schemas
 const registerSchema = z.object({
   email: z.string().email(),
   password: z.string().min(6),
   phone: z.string().min(8).max(15),
   nom: z.string().min(1, 'Le nom est requis'),
   prenom: z.string().min(1, 'Le prénom est requis'),
-  image: z.string().url().optional(), // Optionnel, mais doit être une URL valide si fourni
-  address: z.string().optional(), // Optionnel
+  image: z.string().url().optional(),
+  address: z.string().optional(),
   role: z.nativeEnum(Role),
 });
 
 const loginSchema = z.object({
   email: z.string().email(),
   password: z.string().min(6),
+});
+
+const verifyOTPSchema = z.object({
+  email: z.string().email('Email invalide'),
+  otp: z.string().length(4, 'Le code OTP doit avoir 4 chiffres'),
+});
+
+const resetPasswordSchema = z.object({
+  email: z.string().email('Email invalide'),
+  otp: z.string().length(4, 'Le code OTP doit avoir 4 chiffres'),
+  password: z.string().min(6, 'Le mot de passe doit avoir au moins 6 caractères'),
 });
 
 const updateUserSchema = z.object({
@@ -80,22 +121,15 @@ export const register = async (req: Request, res: Response) => {
     });
 
     if (!user.emailVerified) {
-      const verificationToken = crypto.randomBytes(32).toString('hex');
-      const verificationTokenExpires = new Date(Date.now() + 24 * 60 * 60 * 1000);
+      const otp = generateOTP();
+      const expires = new Date(Date.now() + 15 * 60 * 1000);
 
       await prisma.user.update({
         where: { id: user.id },
-        data: { verificationToken, verificationTokenExpires },
+        data: { emailVerifyOTP: otp, emailVerifyOTPExpires: expires },
       });
 
-      const verificationUrl = `${process.env.FRONTEND_URL}/verify-email/${verificationToken}`;
-      const mailOptions = {
-        to: data.email,
-        subject: 'Vérification de votre email',
-        html: `Cliquez <a href="${verificationUrl}">ici</a> pour vérifier votre email. Ce lien expire dans 24 heures.`,
-      };
-
-      await transporter.sendMail(mailOptions);
+      await sendOTPEmail(data.email, otp, 'verify');
     }
 
     const accessToken = generateAccessToken({ id: user.id, email: user.email, role: user.role });
@@ -113,13 +147,14 @@ export const register = async (req: Request, res: Response) => {
       maxAge: 7 * 24 * 60 * 60 * 1000,
     });
 
-    return res.status(201).json({ message: 'Inscription réussie', accessToken });
+    return res.status(201).json({ 
+      message: 'Inscription réussie. Vérifiez votre email avec le code OTP.', 
+      accessToken 
+    });
   } catch (err: unknown) {
     console.error(err);
     if (err instanceof z.ZodError) {
       return res.status(400).json({ message: 'Données invalides', errors: err.issues });
-    } else if (err instanceof Error && err.name === 'SendMailError') {
-      return res.status(500).json({ message: 'Erreur lors de l\'envoi de l\'email de vérification' });
     }
     return res.status(500).json({ message: 'Erreur serveur' });
   }
@@ -156,7 +191,6 @@ export const login = async (req: Request, res: Response) => {
       maxAge: 7 * 24 * 60 * 60 * 1000,
     });
 
-    // Ajouter role et emailVerified à la réponse
     return res.status(200).json({
       message: 'Connexion réussie',
       accessToken,
@@ -175,7 +209,7 @@ export const login = async (req: Request, res: Response) => {
 export const refreshTokenHandler = async (req: Request, res: Response) => {
   const refreshToken = req.cookies.refreshToken;
   if (!refreshToken) {
-    return res.status(401).json({ message: 'Refresh token missing' });
+    return res.status(401).json({ message: 'Refresh token manquant' });
   }
 
   try {
@@ -185,7 +219,7 @@ export const refreshTokenHandler = async (req: Request, res: Response) => {
     });
 
     if (!user || user.status === Status.PENDING) {
-      return res.status(403).json({ message: 'Invalid refresh token or account pending' });
+      return res.status(403).json({ message: 'Refresh token invalide ou compte en attente' });
     }
 
     const newAccessToken = generateAccessToken({ id: user.id, email: user.email, role: user.role });
@@ -205,7 +239,7 @@ export const refreshTokenHandler = async (req: Request, res: Response) => {
 
     return res.json({ accessToken: newAccessToken });
   } catch (err: unknown) {
-    return res.status(403).json({ message: 'Invalid refresh token' });
+    return res.status(403).json({ message: 'Refresh token invalide' });
   }
 };
 
@@ -230,55 +264,56 @@ export const logout = async (req: Request, res: Response) => {
 };
 
 export const sendVerificationEmail = async (req: AuthRequest, res: Response) => {
-  if (!req.user) return res.status(401).send();
+  if (!req.user) return res.status(401).json({ message: 'Non authentifié' });
 
   try {
-    const token = crypto.randomBytes(32).toString('hex');
-    const expires = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    const otp = generateOTP();
+    const expires = new Date(Date.now() + 15 * 60 * 1000);
 
     await prisma.user.update({
       where: { id: req.user.id },
       data: {
-        verificationToken: token,
-        verificationTokenExpires: expires,
+        emailVerifyOTP: otp,
+        emailVerifyOTPExpires: expires,
+        verificationToken: null,
+        verificationTokenExpires: null,
       },
     });
 
-    const verificationUrl = `${process.env.FRONTEND_URL}/verify-email/${token}`;
-    const mailOptions = {
-      to: req.user.email,
-      subject: 'Vérification de votre email',
-      html: `Cliquez <a href="${verificationUrl}">ici</a> pour vérifier votre email.`,
-    };
+    await sendOTPEmail(req.user.email, otp, 'verify');
 
-    await transporter.sendMail(mailOptions);
-
-    res.json({ message: 'Email de vérification envoyé' });
+    res.json({ 
+      message: 'Code OTP de vérification envoyé',
+      otp: process.env.NODE_ENV === 'development' ? otp : undefined
+    });
   } catch (err: unknown) {
     console.error(err);
-    return res.status(500).json({ message: 'Erreur lors de l\'envoi de l\'email de vérification' });
+    return res.status(500).json({ message: 'Erreur lors de l\'envoi du code OTP' });
   }
 };
 
-export const verifyEmail = async (req: Request, res: Response) => {
+export const verifyEmailWithOTP = async (req: Request, res: Response) => {
   try {
-    const { token } = req.params;
+    const { email, otp } = verifyOTPSchema.parse(req.body);
 
     const user = await prisma.user.findFirst({
       where: {
-        verificationToken: token,
-        verificationTokenExpires: { gt: new Date() },
+        email,
+        emailVerifyOTP: otp,
+        emailVerifyOTPExpires: { gt: new Date() },
       },
     });
 
     if (!user) {
-      return res.status(400).json({ message: 'Token invalide ou expiré' });
+      return res.status(400).json({ message: 'Code OTP invalide ou expiré' });
     }
 
     await prisma.user.update({
       where: { id: user.id },
       data: {
         emailVerified: true,
+        emailVerifyOTP: null,
+        emailVerifyOTPExpires: null,
         verificationToken: null,
         verificationTokenExpires: null,
       },
@@ -287,6 +322,9 @@ export const verifyEmail = async (req: Request, res: Response) => {
     res.json({ message: 'Email vérifié avec succès' });
   } catch (err: unknown) {
     console.error(err);
+    if (err instanceof z.ZodError) {
+      return res.status(400).json({ message: 'Données invalides', errors: err.issues });
+    }
     return res.status(500).json({ message: 'Erreur serveur' });
   }
 };
@@ -297,50 +335,48 @@ export const forgotPassword = async (req: Request, res: Response) => {
 
     const user = await prisma.user.findUnique({ where: { email } });
     if (!user) {
-      return res.json({ message: 'Si cet email existe, un lien de réinitialisation a été envoyé' });
+      return res.json({ message: 'Si cet email existe, un code OTP a été envoyé' });
     }
 
-    const token = crypto.randomBytes(32).toString('hex');
-    const expires = new Date(Date.now() + 60 * 60 * 1000);
+    const otp = generateOTP();
+    const expires = new Date(Date.now() + 15 * 60 * 1000);
 
     await prisma.user.update({
       where: { id: user.id },
       data: {
-        passwordResetToken: token,
-        passwordResetExpires: expires,
+        passwordResetOTP: otp,
+        passwordResetOTPExpires: expires,
+        passwordResetToken: null,
+        passwordResetExpires: null,
       },
     });
 
-    const resetUrl = `${process.env.FRONTEND_URL}/reset-password/${token}`;
-    const mailOptions = {
-      to: user.email,
-      subject: 'Réinitialisation de votre mot de passe',
-      html: `Cliquez <a href="${resetUrl}">ici</a> pour réinitialiser votre mot de passe.`,
-    };
+    await sendOTPEmail(user.email, otp, 'reset');
 
-    await transporter.sendMail(mailOptions);
-
-    res.json({ message: 'Lien de réinitialisation envoyé' });
+    res.json({ 
+      message: 'Code OTP envoyé par email',
+      otp: process.env.NODE_ENV === 'development' ? otp : undefined
+    });
   } catch (err: unknown) {
     console.error(err);
-    return res.status(500).json({ message: 'Erreur lors de l\'envoi du lien de réinitialisation' });
+    return res.status(500).json({ message: 'Erreur lors de l\'envoi du code OTP' });
   }
 };
 
 export const resetPassword = async (req: Request, res: Response) => {
   try {
-    const { token } = req.params;
-    const { password } = req.body;
+    const { email, otp, password } = resetPasswordSchema.parse(req.body);
 
     const user = await prisma.user.findFirst({
       where: {
-        passwordResetToken: token,
-        passwordResetExpires: { gt: new Date() },
+        email,
+         passwordResetOTP: { equals: otp.trim() },
+        passwordResetOTPExpires: { gt: new Date() },
       },
     });
 
     if (!user) {
-      return res.status(400).json({ message: 'Token invalide ou expiré' });
+      return res.status(400).json({ message: 'Code OTP invalide ou expiré' });
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
@@ -349,6 +385,8 @@ export const resetPassword = async (req: Request, res: Response) => {
       where: { id: user.id },
       data: {
         password: hashedPassword,
+        passwordResetOTP: null,
+        passwordResetOTPExpires: null,
         passwordResetToken: null,
         passwordResetExpires: null,
         refreshToken: null,
@@ -358,11 +396,39 @@ export const resetPassword = async (req: Request, res: Response) => {
     res.json({ message: 'Mot de passe réinitialisé avec succès' });
   } catch (err: unknown) {
     console.error(err);
+    if (err instanceof z.ZodError) {
+      return res.status(400).json({ message: 'Données invalides', errors: err.issues });
+    }
     return res.status(500).json({ message: 'Erreur serveur' });
   }
 };
 
-// Nouvelles méthodes pour gérer les utilisateurs
+export const verifyResetOTP = async (req: Request, res: Response) => {
+  try {
+    const { email, otp } = req.body;
+
+    const user = await prisma.user.findFirst({
+      where: {
+        email,
+        passwordResetOTP: otp,
+        passwordResetOTPExpires: { gt: new Date() },
+      },
+    });
+
+    if (!user) {
+      return res.status(400).json({ message: 'Code OTP invalide ou expiré' });
+    }
+
+    return res.json({ 
+      message: 'Code OTP validé',
+      verified: true 
+    });
+  } catch (err: unknown) {
+    console.error(err);
+    return res.status(500).json({ message: 'Erreur serveur' });
+  }
+};
+
 export const getAllUsers = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user || req.user.role !== 'ADMIN') {
@@ -446,7 +512,6 @@ export const updateUser = async (req: AuthRequest, res: Response) => {
 
     const data = updateUserSchema.parse(req.body);
 
-    // Restreindre la modification de role et status aux admins
     if (req.user.role !== 'ADMIN' && (data.role || data.status)) {
       return res.status(403).json({ message: 'Seuls les administrateurs peuvent modifier le rôle ou le statut.' });
     }
@@ -488,7 +553,6 @@ export const deleteUser = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ message: 'ID invalide' });
     }
 
-    // Autoriser la suppression par l'utilisateur lui-même ou un ADMIN
     if (!req.user || (req.user.role !== 'ADMIN' && req.user.id !== userId)) {
       return res.status(403).json({ message: 'Accès refusé. Seuls les administrateurs ou le propriétaire peuvent supprimer cet utilisateur.' });
     }

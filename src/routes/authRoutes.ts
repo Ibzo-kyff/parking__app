@@ -1,22 +1,42 @@
 import express from 'express';
-import { register, login, logout, verifyEmail, sendVerificationEmail, forgotPassword, resetPassword, refreshTokenHandler, getAllUsers, getUserById, updateUser, deleteUser } from '../controllers/authController';
+import { 
+  register, 
+  login, 
+  logout, 
+  sendVerificationEmail, 
+  verifyEmailWithOTP, 
+  verifyResetOTP,
+  forgotPassword, 
+  resetPassword, 
+  refreshTokenHandler, 
+  getAllUsers, 
+  getUserById, 
+  updateUser, 
+  deleteUser 
+} from '../controllers/authController';
 import { authenticateToken } from '../middleware/authMiddleware';
 
 const router = express.Router();
 
+// Routes d'authentification
 router.post('/register', register);
 router.post('/login', login);
 router.post('/logout', authenticateToken, logout);
 router.post('/refresh', refreshTokenHandler);
-router.post('/send-verification', authenticateToken, sendVerificationEmail);
-router.get('/verify-email/:token', verifyEmail);
-router.post('/forgot-password', forgotPassword);
-router.post('/reset-password/:token', resetPassword);
 
-// Nouvelles routes pour la gestion des utilisateurs
-router.get('/users', authenticateToken, getAllUsers); // Récupérer tous les utilisateurs
-router.get('/users/:id', authenticateToken, getUserById); // Récupérer un utilisateur par ID
-router.put('/users/:id', authenticateToken, updateUser); // Mettre à jour un utilisateur
-router.delete('/users/:id', authenticateToken, deleteUser); // Supprimer un utilisateur
+// Routes pour la vérification d'email
+router.post('/send-verification-email', authenticateToken, sendVerificationEmail);
+router.post('/verify-email-otp', verifyEmailWithOTP); 
+router.post('/verify-reset-otp', verifyResetOTP);
+
+// Routes pour la réinitialisation de mot de passe
+router.post('/forgot-password', forgotPassword);
+router.post('/reset-password', resetPassword);
+
+// Routes de gestion des utilisateurs
+router.get('/users', authenticateToken, getAllUsers);
+router.get('/users/:id', authenticateToken, getUserById);
+router.put('/users/:id', authenticateToken, updateUser);
+router.delete('/users/:id', authenticateToken, deleteUser);
 
 export default router;
