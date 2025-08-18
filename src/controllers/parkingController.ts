@@ -44,7 +44,8 @@ export const createParking = async (req: Request, res: Response) => {
         description,
         capacity,
         hoursOfOperation,
-        status: status || ParkingStatus.ACTIVE
+        status: status || ParkingStatus.ACTIVE,
+        logo: req.body.logo || undefined
       }
     });
 
@@ -100,7 +101,7 @@ export const updateParking = async (req: Request, res: Response) => {
   } = req.body;
 
   try {
-    const updated = await prisma.parking.update({
+    const updatedParking = await prisma.parking.update({
       where: { id: parseInt(id) },
       data: {
         name,
@@ -111,10 +112,11 @@ export const updateParking = async (req: Request, res: Response) => {
         description,
         capacity,
         hoursOfOperation,
-        status
+        status,
+        ...(req.body.logo && { logo: req.body.logo })
       }
     });
-    return res.json({ message: 'Parking mis à jour', parking: updated });
+    return res.json({ message: 'Parking mis à jour', parking: updatedParking });
   } catch (err) {
     return res.status(500).json({ error: 'Erreur lors de la mise à jour du parking' });
   }
