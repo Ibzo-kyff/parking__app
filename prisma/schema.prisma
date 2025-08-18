@@ -23,6 +23,10 @@ model User {
   verificationTokenExpires DateTime?
   passwordResetToken   String?
   passwordResetExpires DateTime?
+  passwordResetOTP      String?  
+  passwordResetOTPExpires DateTime? 
+  emailVerifyOTP        String?   
+  emailVerifyOTPExpires DateTime? 
   status               Status   @default(PENDING) // Utilisé uniquement pour PARKING ou ADMIN
   createdAt            DateTime  @default(now())
   updatedAt            DateTime  @updatedAt
