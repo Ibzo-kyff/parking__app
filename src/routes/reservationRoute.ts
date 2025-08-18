@@ -26,5 +26,4 @@ router.get('/parking/all', getAllReservationsForParking);
 // Routes admin seulement
 router.get('/admin/all', getAllReservations);
 router.put('/admin/:id', updateReservation);
-
 export default router;

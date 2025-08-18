@@ -28,7 +28,6 @@ export const createReservation = async (req: AuthRequest, res: Response) => {
     if (startDate >= endDate) {
       return res.status(400).json({ message: 'La date de fin doit être après la date de début' });
     }
-
     const vehicle = await prisma.vehicle.findUnique({
       where: { id: vehicleId },
       include: { reservations: true },
