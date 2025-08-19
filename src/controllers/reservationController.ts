@@ -269,7 +269,6 @@ export const cancelReservation = async (req: AuthRequest, res: Response) => {
     return res.status(500).json({ message: 'Erreur serveur' });
   }
 };
-
 // Mettre à jour une réservation (ADMIN)
 export const updateReservation = async (req: AuthRequest, res: Response) => {
   try {
@@ -293,7 +292,6 @@ export const updateReservation = async (req: AuthRequest, res: Response) => {
       data,
       include: { vehicle: true, user: true },
     });
-
     return res.json(updatedReservation);
   } catch (err) {
     console.error(err);
