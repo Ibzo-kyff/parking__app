@@ -17,4 +17,7 @@ router.post('/upload-image', validate_1.upload.single('image'), (req, res) => {
     const imageUrl = `/public/${req.file.filename}`;
     return res.status(201).json({ message: 'Image uploadée avec succès', imageUrl });
 });
+router.get('/marques', vehiculeController_1.getDistinctMarques);
+router.get('/models', vehiculeController_1.getDistinctModels);
+router.get('/recent-parkings', vehiculeController_1.getRecentParkings);
 exports.default = router;

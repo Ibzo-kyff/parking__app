@@ -4,7 +4,10 @@ import {
   getAllVehicules,
   getVehiculeById,
   updateVehicule,
-  deleteVehicule
+  deleteVehicule,
+  getDistinctMarques,
+  getDistinctModels,
+  getRecentParkings
 } from '../controllers/vehiculeController';
 import { upload } from '../middleware/validate';
 
@@ -23,5 +26,8 @@ router.post('/upload-image', upload.single('image'), (req, res) => {
   const imageUrl = `/public/${req.file.filename}`;
   return res.status(201).json({ message: 'Image uploadée avec succès', imageUrl });
 });
+router.get('/marques', getDistinctMarques);
+router.get('/models', getDistinctModels);
+router.get('/recent-parkings', getRecentParkings);
 
 export default router;
