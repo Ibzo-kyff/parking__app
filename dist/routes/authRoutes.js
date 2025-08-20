@@ -21,7 +21,9 @@ router.post('/forgot-password', authController_1.forgotPassword);
 router.post('/reset-password', authController_1.resetPassword);
 // Routes de gestion des utilisateurs
 router.get('/users', authMiddleware_1.authenticateToken, authController_1.getAllUsers);
+router.get('/users/me', authMiddleware_1.authenticateToken, authController_1.getCurrentUser); // Ajout pour récupérer les infos de l'utilisateur connecté
 router.get('/users/:id', authMiddleware_1.authenticateToken, authController_1.getUserById);
+router.put('/users/me', authMiddleware_1.authenticateToken, authController_1.updateCurrentUser); // Ajout pour mise à jour du profil de l'utilisateur connecté
 router.put('/users/:id', authMiddleware_1.authenticateToken, authController_1.updateUser);
 router.delete('/users/:id', authMiddleware_1.authenticateToken, authController_1.deleteUser);
 exports.default = router;

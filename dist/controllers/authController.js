@@ -12,7 +12,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.deleteUser = exports.updateUser = exports.getUserById = exports.getAllUsers = exports.verifyResetOTP = exports.resetPassword = exports.forgotPassword = exports.verifyEmailWithOTP = exports.sendVerificationEmail = exports.logout = exports.refreshTokenHandler = exports.login = exports.register = void 0;
+exports.deleteUser = exports.updateCurrentUser = exports.updateUser = exports.getCurrentUser = exports.getUserById = exports.getAllUsers = exports.verifyResetOTP = exports.resetPassword = exports.forgotPassword = exports.verifyEmailWithOTP = exports.sendVerificationEmail = exports.logout = exports.refreshTokenHandler = exports.login = exports.register = void 0;
 const client_1 = require("@prisma/client");
 const bcrypt_1 = __importDefault(require("bcrypt"));
 const zod_1 = require("zod");
@@ -87,6 +87,14 @@ const updateUserSchema = zod_1.z.object({
     role: zod_1.z.nativeEnum(client_1.Role).optional(),
     status: zod_1.z.nativeEnum(client_1.Status).optional(),
     emailVerified: zod_1.z.boolean().optional(),
+    password: zod_1.z.string().min(6).optional(),
+});
+const selfUpdateSchema = zod_1.z.object({
+    phone: zod_1.z.string().min(8).max(15).optional(),
+    nom: zod_1.z.string().min(1).optional(),
+    prenom: zod_1.z.string().min(1).optional(),
+    image: zod_1.z.string().url().optional(),
+    address: zod_1.z.string().optional(),
     password: zod_1.z.string().min(6).optional(),
 });
 const register = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
@@ -176,6 +184,8 @@ const login = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
             accessToken,
             role: user.role,
             emailVerified: user.emailVerified,
+            nom: user.nom,
+            prenom: user.prenom,
         });
     }
     catch (err) {
@@ -337,7 +347,7 @@ const resetPassword = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         const user = yield prisma.user.findFirst({
             where: {
                 email,
-                passwordResetOTP: { equals: otp.trim() },
+                passwordResetOTP: otp,
                 passwordResetOTPExpires: { gt: new Date() },
             },
         });
@@ -457,6 +467,39 @@ const getUserById = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
     }
 });
 exports.getUserById = getUserById;
+const getCurrentUser = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        if (!req.user) {
+            return res.status(401).json({ message: 'Non authentifié' });
+        }
+        const user = yield prisma.user.findUnique({
+            where: { id: req.user.id },
+            select: {
+                id: true,
+                email: true,
+                phone: true,
+                nom: true,
+                prenom: true,
+                image: true,
+                address: true,
+                role: true,
+                status: true,
+                emailVerified: true,
+                createdAt: true,
+                updatedAt: true,
+            },
+        });
+        if (!user) {
+            return res.status(404).json({ message: 'Utilisateur non trouvé' });
+        }
+        return res.status(200).json(user);
+    }
+    catch (err) {
+        console.error(err);
+        return res.status(500).json({ message: 'Erreur serveur' });
+    }
+});
+exports.getCurrentUser = getCurrentUser;
 const updateUser = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const userId = parseInt(req.params.id);
@@ -500,6 +543,52 @@ const updateUser = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
     }
 });
 exports.updateUser = updateUser;
+const updateCurrentUser = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        if (!req.user) {
+            return res.status(401).json({ message: 'Non authentifié' });
+        }
+        const data = selfUpdateSchema.parse(req.body);
+        const hashedPassword = data.password ? yield bcrypt_1.default.hash(data.password, 10) : undefined;
+        const updatedUser = yield prisma.user.update({
+            where: { id: req.user.id },
+            data: {
+                phone: data.phone,
+                nom: data.nom,
+                prenom: data.prenom,
+                image: data.image,
+                address: data.address,
+                password: hashedPassword,
+            },
+            select: {
+                id: true,
+                email: true,
+                phone: true,
+                nom: true,
+                prenom: true,
+                image: true,
+                address: true,
+                role: true,
+                status: true,
+                emailVerified: true,
+                createdAt: true,
+                updatedAt: true,
+            },
+        });
+        return res.status(200).json({ message: 'Profil mis à jour avec succès', user: updatedUser });
+    }
+    catch (err) {
+        console.error(err);
+        if (err instanceof zod_1.z.ZodError) {
+            return res.status(400).json({ message: 'Données invalides', errors: err.issues });
+        }
+        else if (err instanceof Error && 'code' in err && err.code === 'P2025') {
+            return res.status(404).json({ message: 'Utilisateur non trouvé' });
+        }
+        return res.status(500).json({ message: 'Erreur serveur' });
+    }
+});
+exports.updateCurrentUser = updateCurrentUser;
 const deleteUser = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const userId = parseInt(req.params.id);
