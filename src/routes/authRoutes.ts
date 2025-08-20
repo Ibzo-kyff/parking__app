@@ -10,7 +10,9 @@ import {
   resetPassword, 
   refreshTokenHandler, 
   getAllUsers, 
-  getUserById, 
+  getUserById,
+  getCurrentUser,
+  updateCurrentUser, 
   updateUser, 
   deleteUser 
 } from '../controllers/authController';
@@ -35,7 +37,9 @@ router.post('/reset-password', resetPassword);
 
 // Routes de gestion des utilisateurs
 router.get('/users', authenticateToken, getAllUsers);
+router.get('/users/me', authenticateToken, getCurrentUser); // Ajout pour récupérer les infos de l'utilisateur connecté
 router.get('/users/:id', authenticateToken, getUserById);
+router.put('/users/me', authenticateToken, updateCurrentUser); // Ajout pour mise à jour du profil de l'utilisateur connecté
 router.put('/users/:id', authenticateToken, updateUser);
 router.delete('/users/:id', authenticateToken, deleteUser);
 
