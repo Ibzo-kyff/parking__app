@@ -12,7 +12,6 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.deleteNotification = exports.markAsRead = exports.getNotificationById = exports.getNotifications = exports.createNotification = void 0;
 const client_1 = require("@prisma/client");
 const zod_1 = require("zod");
-console.log('DEBUG NotificationType:', client_1.NotificationType);
 const prisma = new client_1.PrismaClient();
 // Schéma de validation
 const createNotificationSchema = zod_1.z.object({
