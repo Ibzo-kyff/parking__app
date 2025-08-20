@@ -92,6 +92,15 @@ const updateUserSchema = z.object({
   password: z.string().min(6).optional(),
 });
 
+const selfUpdateSchema = z.object({
+  phone: z.string().min(8).max(15).optional(),
+  nom: z.string().min(1).optional(),
+  prenom: z.string().min(1).optional(),
+  image: z.string().url().optional(),
+  address: z.string().optional(),
+  password: z.string().min(6).optional(),
+});
+
 export const register = async (req: Request, res: Response) => {
   try {
     const data = registerSchema.parse(req.body);
@@ -196,6 +205,8 @@ export const login = async (req: Request, res: Response) => {
       accessToken,
       role: user.role,
       emailVerified: user.emailVerified,
+      nom: user.nom,
+      prenom: user.prenom,
     });
   } catch (err: unknown) {
     console.error(err);
@@ -370,7 +381,7 @@ export const resetPassword = async (req: Request, res: Response) => {
     const user = await prisma.user.findFirst({
       where: {
         email,
-         passwordResetOTP: { equals: otp.trim() },
+        passwordResetOTP: otp,
         passwordResetOTPExpires: { gt: new Date() },
       },
     });
@@ -499,6 +510,41 @@ export const getUserById = async (req: AuthRequest, res: Response) => {
   }
 };
 
+export const getCurrentUser = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ message: 'Non authentifié' });
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: req.user.id },
+      select: {
+        id: true,
+        email: true,
+        phone: true,
+        nom: true,
+        prenom: true,
+        image: true,
+        address: true,
+        role: true,
+        status: true,
+        emailVerified: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+
+    if (!user) {
+      return res.status(404).json({ message: 'Utilisateur non trouvé' });
+    }
+
+    return res.status(200).json(user);
+  } catch (err: unknown) {
+    console.error(err);
+    return res.status(500).json({ message: 'Erreur serveur' });
+  }
+};
+
 export const updateUser = async (req: AuthRequest, res: Response) => {
   try {
     const userId = parseInt(req.params.id);
@@ -535,6 +581,54 @@ export const updateUser = async (req: AuthRequest, res: Response) => {
     });
 
     return res.status(200).json({ message: 'Utilisateur mis à jour avec succès', user: updatedUser });
+  } catch (err: unknown) {
+    console.error(err);
+    if (err instanceof z.ZodError) {
+      return res.status(400).json({ message: 'Données invalides', errors: err.issues });
+    } else if (err instanceof Error && 'code' in err && err.code === 'P2025') {
+      return res.status(404).json({ message: 'Utilisateur non trouvé' });
+    }
+    return res.status(500).json({ message: 'Erreur serveur' });
+  }
+};
+
+export const updateCurrentUser = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ message: 'Non authentifié' });
+    }
+
+    const data = selfUpdateSchema.parse(req.body);
+
+    const hashedPassword = data.password ? await bcrypt.hash(data.password, 10) : undefined;
+
+    const updatedUser = await prisma.user.update({
+      where: { id: req.user.id },
+      data: {
+        phone: data.phone,
+        nom: data.nom,
+        prenom: data.prenom,
+        image: data.image,
+        address: data.address,
+        password: hashedPassword,
+      },
+      select: {
+        id: true,
+        email: true,
+        phone: true,
+        nom: true,
+        prenom: true,
+        image: true,
+        address: true,
+        role: true,
+        status: true,
+        emailVerified: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+
+    return res.status(200).json({ message: 'Profil mis à jour avec succès', user: updatedUser });
   } catch (err: unknown) {
     console.error(err);
     if (err instanceof z.ZodError) {
