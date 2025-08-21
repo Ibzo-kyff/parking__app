@@ -158,7 +158,12 @@ export const register = async (req: Request, res: Response) => {
 
     return res.status(201).json({ 
       message: 'Inscription réussie. Vérifiez votre email avec le code OTP.', 
-      accessToken 
+      accessToken,
+      nom: user.nom,
+      prenom: user.prenom,
+      email: user.email,
+      role: user.role,
+      emailVerified: user.emailVerified
     });
   } catch (err: unknown) {
     console.error(err);

@@ -143,7 +143,12 @@ const register = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
         });
         return res.status(201).json({
             message: 'Inscription réussie. Vérifiez votre email avec le code OTP.',
-            accessToken
+            accessToken,
+            nom: user.nom,
+            prenom: user.prenom,
+            email: user.email,
+            role: user.role,
+            emailVerified: user.emailVerified
         });
     }
     catch (err) {
