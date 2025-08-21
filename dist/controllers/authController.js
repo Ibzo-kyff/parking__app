@@ -19,6 +19,8 @@ const zod_1 = require("zod");
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const jwtUtils_1 = require("../utils/jwtUtils");
 const nodemailer_1 = __importDefault(require("nodemailer"));
+const fs_1 = __importDefault(require("fs"));
+const path_1 = __importDefault(require("path"));
 const prisma = new client_1.PrismaClient();
 const transporter = nodemailer_1.default.createTransport({
     service: 'gmail',
@@ -99,11 +101,22 @@ const selfUpdateSchema = zod_1.z.object({
 });
 const register = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        const data = registerSchema.parse(req.body);
+        // If a file was uploaded by multer, set the image url to the filename (relative path)
+        const image = req.file ? `/uploads/${req.file.filename}` : undefined;
+        // Merge image into body so validation can run (image expected to be a URL string in schema)
+        const body = Object.assign(Object.assign({}, req.body), (image ? { image } : {}));
+        const data = registerSchema.parse(body);
         const existing = yield prisma.user.findFirst({
             where: { OR: [{ email: data.email }, { phone: data.phone }] },
         });
         if (existing) {
+            // If we stored a file but user already exists, delete the uploaded file to avoid orphan files
+            if (req.file) {
+                try {
+                    yield fs_1.default.promises.unlink(path_1.default.join(__dirname, '../../uploads', req.file.filename));
+                }
+                catch (e) { /* ignore */ }
+            }
             return res.status(409).json({ message: 'Email ou téléphone déjà utilisé.' });
         }
         const hashedPassword = yield bcrypt_1.default.hash(data.password, 10);
@@ -553,7 +566,11 @@ const updateCurrentUser = (req, res) => __awaiter(void 0, void 0, void 0, functi
         if (!req.user) {
             return res.status(401).json({ message: 'Non authentifié' });
         }
-        const data = selfUpdateSchema.parse(req.body);
+        // If a file was uploaded, use it
+        const image = req.file ? `/uploads/${req.file.filename}` : undefined;
+        // merge image into body for zod parsing
+        const body = Object.assign(Object.assign({}, req.body), (image ? { image } : {}));
+        const data = selfUpdateSchema.parse(body);
         const hashedPassword = data.password ? yield bcrypt_1.default.hash(data.password, 10) : undefined;
         const updatedUser = yield prisma.user.update({
             where: { id: req.user.id },

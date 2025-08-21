@@ -7,6 +7,8 @@ import { generateAccessToken, generateRefreshToken } from '../utils/jwtUtils';
 import crypto from 'crypto';
 import nodemailer from 'nodemailer';
 import { JwtPayload } from 'jsonwebtoken';
+import fs from 'fs';
+import path from 'path';
 
 interface AuthRequest extends Request {
   user?: JwtPayload;
@@ -103,13 +105,22 @@ const selfUpdateSchema = z.object({
 
 export const register = async (req: Request, res: Response) => {
   try {
-    const data = registerSchema.parse(req.body);
+    // If a file was uploaded by multer, set the image url to the filename (relative path)
+    const image = (req as any).file ? `/uploads/${(req as any).file.filename}` : undefined;
+
+    // Merge image into body so validation can run (image expected to be a URL string in schema)
+    const body = { ...req.body, ...(image ? { image } : {}) };
+    const data = registerSchema.parse(body);
 
     const existing = await prisma.user.findFirst({
       where: { OR: [{ email: data.email }, { phone: data.phone }] },
     });
 
     if (existing) {
+      // If we stored a file but user already exists, delete the uploaded file to avoid orphan files
+      if ((req as any).file) {
+        try { await fs.promises.unlink(path.join(__dirname, '../../uploads', (req as any).file.filename)); } catch (e) { /* ignore */ }
+      }
       return res.status(409).json({ message: 'Email ou téléphone déjà utilisé.' });
     }
 
@@ -603,7 +614,13 @@ export const updateCurrentUser = async (req: AuthRequest, res: Response) => {
       return res.status(401).json({ message: 'Non authentifié' });
     }
 
-    const data = selfUpdateSchema.parse(req.body);
+    // If a file was uploaded, use it
+    const image = (req as any).file ? `/uploads/${(req as any).file.filename}` : undefined;
+
+    // merge image into body for zod parsing
+    const body = { ...req.body, ...(image ? { image } : {}) };
+
+    const data = selfUpdateSchema.parse(body);
 
     const hashedPassword = data.password ? await bcrypt.hash(data.password, 10) : undefined;
 
