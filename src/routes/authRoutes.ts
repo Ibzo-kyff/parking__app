@@ -17,11 +17,12 @@ import {
   deleteUser 
 } from '../controllers/authController';
 import { authenticateToken } from '../middleware/authMiddleware';
+import upload from '../middleware/uploadMiddleware';
 
 const router = express.Router();
 
 // Routes d'authentification
-router.post('/register', register);
+router.post('/register', upload.single('image'), register);
 router.post('/login', login);
 router.post('/logout', authenticateToken, logout);
 router.post('/refresh', refreshTokenHandler);
@@ -39,8 +40,8 @@ router.post('/reset-password', resetPassword);
 router.get('/users', authenticateToken, getAllUsers);
 router.get('/users/me', authenticateToken, getCurrentUser); // Ajout pour récupérer les infos de l'utilisateur connecté
 router.get('/users/:id', authenticateToken, getUserById);
-router.put('/users/me', authenticateToken, updateCurrentUser); // Ajout pour mise à jour du profil de l'utilisateur connecté
-router.put('/users/:id', authenticateToken, updateUser);
+router.put('/users/me', authenticateToken, upload.single('image'), updateCurrentUser); // Ajout pour mise à jour du profil de l'utilisateur connecté
+router.put('/users/:id', authenticateToken, upload.single('image'), updateUser);
 router.delete('/users/:id', authenticateToken, deleteUser);
 
 export default router;
