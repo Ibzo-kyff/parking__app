@@ -105,10 +105,8 @@ const selfUpdateSchema = z.object({
 
 export const register = async (req: Request, res: Response) => {
   try {
-    // If a file was uploaded by multer, set the image url to the filename (relative path)
     const image = (req as any).file ? `/uploads/${(req as any).file.filename}` : undefined;
 
-    // Merge image into body so validation can run (image expected to be a URL string in schema)
     const body = { ...req.body, ...(image ? { image } : {}) };
     const data = registerSchema.parse(body);
 
@@ -117,7 +115,6 @@ export const register = async (req: Request, res: Response) => {
     });
 
     if (existing) {
-      // If we stored a file but user already exists, delete the uploaded file to avoid orphan files
       if ((req as any).file) {
         try { await fs.promises.unlink(path.join(__dirname, '../../uploads', (req as any).file.filename)); } catch (e) { /* ignore */ }
       }
