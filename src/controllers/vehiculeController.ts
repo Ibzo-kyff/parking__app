@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { PrismaClient, Role } from '@prisma/client';
+import { AuthRequest } from '../middleware/authMiddleware';
 
 const prisma = new PrismaClient();
 
@@ -288,5 +289,150 @@ export const getRecentParkings = async (_req: Request, res: Response) => {
     return res.json(parkings);
   } catch (err) {
     return res.status(500).json({ error: 'Erreur lors de la récupération des parkings récents' });
+  }
+};
+// GET VEHICLES FOR PARKING USER WITH STATS
+export const getParkingUserVehicles = async (req: AuthRequest, res: Response) => {
+  try {
+    // Vérifier que l'utilisateur est authentifié et a le rôle PARKING
+    if (!req.user || req.user.role !== Role.PARKING) {
+      return res.status(403).json({ 
+        error: 'Accès refusé. Seuls les utilisateurs PARKING peuvent accéder à cette ressource.' 
+      });
+    }
+
+    // Récupérer l'ID de l'utilisateur connecté
+    const userId = req.user.id;
+
+    // Trouver le parking associé à cet utilisateur
+    const parking = await prisma.parking.findFirst({
+      where: { userId: userId },
+      select: { id: true, name: true }
+    });
+
+    if (!parking) {
+      return res.status(404).json({ 
+        error: 'Aucun parking trouvé pour cet utilisateur.' 
+      });
+    }
+
+    // Récupérer les véhicules du parking avec les relations nécessaires
+    const vehicles = await prisma.vehicle.findMany({
+      where: { 
+        parkingId: parking.id 
+      },
+      include: {
+        // Inclure les informations du propriétaire si nécessaire
+        userOwner: {
+          select: {
+            id: true,
+            nom: true,
+            prenom: true,
+            email: true,
+            phone: true
+          }
+        },
+        // Inclure les statistiques de base
+        stats: {
+          select: {
+            vues: true,
+            reservations: true
+          }
+        },
+        // Inclure les favoris pour les statistiques
+        favorites: {
+          select: {
+            id: true,
+            userId: true
+          }
+        },
+        // Inclure les réservations pour les statistiques détaillées
+        reservations: {
+          select: {
+            id: true,
+            type: true,
+            dateDebut: true,
+            dateFin: true
+          }
+        }
+      },
+      orderBy: {
+        createdAt: 'desc'
+      }
+    });
+
+    // Calculer les statistiques agrégées basées sur le status des véhicules
+    const stats = {
+      total: vehicles.length,
+      vendus: vehicles.filter(v => v.status === 'ACHETE').length,
+      reserves: vehicles.filter(v => v.status === 'EN_LOCATION').length,
+      disponibles: vehicles.filter(v => v.status === 'DISPONIBLE').length,
+      enMaintenance: vehicles.filter(v => v.status === 'EN_MAINTENANCE').length,
+      indisponibles: vehicles.filter(v => v.status === 'INDISPONIBLE').length,
+      totalVues: vehicles.reduce((sum, vehicle) => sum + (vehicle.stats?.vues || 0), 0),
+      totalReservations: vehicles.reduce((sum, vehicle) => sum + (vehicle.stats?.reservations || 0), 0),
+      totalFavoris: vehicles.reduce((sum, vehicle) => sum + vehicle.favorites.length, 0)
+    };
+
+    // Formater les véhicules avec des statistiques supplémentaires
+    const formattedVehicles = vehicles.map(vehicle => ({
+      ...vehicle,
+      stats: {
+        vues: vehicle.stats?.vues || 0,
+        reservations: vehicle.stats?.reservations || 0,
+        favoris: vehicle.favorites.length,
+        reservationsActives: vehicle.reservations.filter(r => 
+          new Date(r.dateFin) > new Date()
+        ).length
+      }
+    }));
+
+    return res.json({
+      parking: {
+        id: parking.id,
+        name: parking.name
+      },
+      statistics: stats,
+      vehicles: formattedVehicles
+    });
+
+  } catch (err) {
+    console.error('Erreur lors de la récupération des véhicules du parking:', err);
+    return res.status(500).json({ 
+      error: 'Erreur lors de la récupération des véhicules du parking',
+      details: err instanceof Error ? err.message : 'Erreur inconnue'
+    });
+  }
+};
+// Optionnel : Ajouter une route pour les statistiques détaillées
+export const getParkingStats = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user || req.user.role !== Role.PARKING) {
+      return res.status(403).json({ 
+        error: 'Accès refusé' 
+      });
+    }
+
+    const userId = req.user.id;
+    const parking = await prisma.parking.findFirst({
+      where: { userId: userId },
+      select: { id: true }
+    });
+
+    if (!parking) {
+      return res.status(404).json({ error: 'Parking non trouvé' });
+    }
+
+    // Statistiques mensuelles, etc.
+    const monthlyStats = await prisma.vehicle.groupBy({
+      by: ['status'],
+      where: { parkingId: parking.id },
+      _count: { id: true }
+    });
+
+    return res.json({ monthlyStats });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: 'Erreur serveur' });
   }
 };

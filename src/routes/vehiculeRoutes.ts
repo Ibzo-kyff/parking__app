@@ -7,9 +7,12 @@ import {
   deleteVehicule,
   getDistinctMarques,
   getDistinctModels,
-  getRecentParkings
+  getRecentParkings,
+  getParkingStats,
+  getParkingUserVehicles // Ajouter cette importation
 } from '../controllers/vehiculeController';
 import { upload } from '../middleware/validate';
+import { authenticateToken } from '../middleware/authMiddleware'; // Import du middleware d'authentification
 
 const router = Router();
 
@@ -17,6 +20,10 @@ const router = Router();
 router.get('/marques', getDistinctMarques);
 router.get('/models', getDistinctModels);
 router.get('/recent-parkings', getRecentParkings);
+
+// Nouvelle route pour les véhicules du parking utilisateur (protégée par authentification)
+router.get('/parking/my-vehicles', authenticateToken, getParkingUserVehicles);
+router.get('/parking/stats', authenticateToken, getParkingStats);
 
 // Routes générales ensuite
 router.post('/', createVehicule);

@@ -9,7 +9,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getRecentParkings = exports.getDistinctModels = exports.getDistinctMarques = exports.deleteVehicule = exports.updateVehicule = exports.getVehiculeById = exports.getAllVehicules = exports.createVehicule = void 0;
+exports.getParkingStats = exports.getParkingUserVehicles = exports.getRecentParkings = exports.getDistinctModels = exports.getDistinctMarques = exports.deleteVehicule = exports.updateVehicule = exports.getVehiculeById = exports.getAllVehicules = exports.createVehicule = void 0;
 const client_1 = require("@prisma/client");
 const prisma = new client_1.PrismaClient();
 // CREATE VEHICULE
@@ -242,3 +242,138 @@ const getRecentParkings = (_req, res) => __awaiter(void 0, void 0, void 0, funct
     }
 });
 exports.getRecentParkings = getRecentParkings;
+// GET VEHICLES FOR PARKING USER WITH STATS
+const getParkingUserVehicles = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        // Vérifier que l'utilisateur est authentifié et a le rôle PARKING
+        if (!req.user || req.user.role !== client_1.Role.PARKING) {
+            return res.status(403).json({
+                error: 'Accès refusé. Seuls les utilisateurs PARKING peuvent accéder à cette ressource.'
+            });
+        }
+        // Récupérer l'ID de l'utilisateur connecté
+        const userId = req.user.id;
+        // Trouver le parking associé à cet utilisateur
+        const parking = yield prisma.parking.findFirst({
+            where: { userId: userId },
+            select: { id: true, name: true }
+        });
+        if (!parking) {
+            return res.status(404).json({
+                error: 'Aucun parking trouvé pour cet utilisateur.'
+            });
+        }
+        // Récupérer les véhicules du parking avec les relations nécessaires
+        const vehicles = yield prisma.vehicle.findMany({
+            where: {
+                parkingId: parking.id
+            },
+            include: {
+                // Inclure les informations du propriétaire si nécessaire
+                userOwner: {
+                    select: {
+                        id: true,
+                        nom: true,
+                        prenom: true,
+                        email: true,
+                        phone: true
+                    }
+                },
+                // Inclure les statistiques de base
+                stats: {
+                    select: {
+                        vues: true,
+                        reservations: true
+                    }
+                },
+                // Inclure les favoris pour les statistiques
+                favorites: {
+                    select: {
+                        id: true,
+                        userId: true
+                    }
+                },
+                // Inclure les réservations pour les statistiques détaillées
+                reservations: {
+                    select: {
+                        id: true,
+                        type: true,
+                        dateDebut: true,
+                        dateFin: true
+                    }
+                }
+            },
+            orderBy: {
+                createdAt: 'desc'
+            }
+        });
+        // Calculer les statistiques agrégées basées sur le status des véhicules
+        const stats = {
+            total: vehicles.length,
+            vendus: vehicles.filter(v => v.status === 'ACHETE').length,
+            reserves: vehicles.filter(v => v.status === 'EN_LOCATION').length,
+            disponibles: vehicles.filter(v => v.status === 'DISPONIBLE').length,
+            enMaintenance: vehicles.filter(v => v.status === 'EN_MAINTENANCE').length,
+            indisponibles: vehicles.filter(v => v.status === 'INDISPONIBLE').length,
+            totalVues: vehicles.reduce((sum, vehicle) => { var _a; return sum + (((_a = vehicle.stats) === null || _a === void 0 ? void 0 : _a.vues) || 0); }, 0),
+            totalReservations: vehicles.reduce((sum, vehicle) => { var _a; return sum + (((_a = vehicle.stats) === null || _a === void 0 ? void 0 : _a.reservations) || 0); }, 0),
+            totalFavoris: vehicles.reduce((sum, vehicle) => sum + vehicle.favorites.length, 0)
+        };
+        // Formater les véhicules avec des statistiques supplémentaires
+        const formattedVehicles = vehicles.map(vehicle => {
+            var _a, _b;
+            return (Object.assign(Object.assign({}, vehicle), { stats: {
+                    vues: ((_a = vehicle.stats) === null || _a === void 0 ? void 0 : _a.vues) || 0,
+                    reservations: ((_b = vehicle.stats) === null || _b === void 0 ? void 0 : _b.reservations) || 0,
+                    favoris: vehicle.favorites.length,
+                    reservationsActives: vehicle.reservations.filter(r => new Date(r.dateFin) > new Date()).length
+                } }));
+        });
+        return res.json({
+            parking: {
+                id: parking.id,
+                name: parking.name
+            },
+            statistics: stats,
+            vehicles: formattedVehicles
+        });
+    }
+    catch (err) {
+        console.error('Erreur lors de la récupération des véhicules du parking:', err);
+        return res.status(500).json({
+            error: 'Erreur lors de la récupération des véhicules du parking',
+            details: err instanceof Error ? err.message : 'Erreur inconnue'
+        });
+    }
+});
+exports.getParkingUserVehicles = getParkingUserVehicles;
+// Optionnel : Ajouter une route pour les statistiques détaillées
+const getParkingStats = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        if (!req.user || req.user.role !== client_1.Role.PARKING) {
+            return res.status(403).json({
+                error: 'Accès refusé'
+            });
+        }
+        const userId = req.user.id;
+        const parking = yield prisma.parking.findFirst({
+            where: { userId: userId },
+            select: { id: true }
+        });
+        if (!parking) {
+            return res.status(404).json({ error: 'Parking non trouvé' });
+        }
+        // Statistiques mensuelles, etc.
+        const monthlyStats = yield prisma.vehicle.groupBy({
+            by: ['status'],
+            where: { parkingId: parking.id },
+            _count: { id: true }
+        });
+        return res.json({ monthlyStats });
+    }
+    catch (err) {
+        console.error(err);
+        return res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+exports.getParkingStats = getParkingStats;
