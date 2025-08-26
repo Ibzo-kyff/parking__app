@@ -25,8 +25,6 @@ const app = (0, express_1.default)();
 const prisma = new client_1.PrismaClient();
 app.use(express_1.default.json());
 app.use((0, cookie_parser_1.default)());
-// Ajout pour servir le dossier public
-app.use('/public', express_1.default.static(path_1.default.join(__dirname, '../public')));
 // Ajout pour servir les dossiers statiques
 app.use('/uploads', express_1.default.static(path_1.default.join(__dirname, '../uploads')));
 app.use('/api/auth', authRoutes_1.default);

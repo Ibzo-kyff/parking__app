@@ -14,63 +14,40 @@ const client_1 = require("@prisma/client");
 const prisma = new client_1.PrismaClient();
 // CREATE VEHICULE
 const createVehicule = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    const { userOwnerId, parkingId, marque, model, prix, description, photos = [], garantie = false, dureeGarantie, documents = [], chauffeur = false, // Valeur par défaut true
-    assurance, dureeAssurance, carteGrise, vignette, fuelType, mileage } = req.body;
-    // 🚫 Un seul des deux doit être fourni
-    if ((userOwnerId && parkingId) || (!userOwnerId && !parkingId)) {
-        return res.status(400).json({
-            error: 'Un véhicule doit appartenir soit à un utilisateur (userOwnerId), soit à un parking (parkingId), mais pas aux deux ou aucun.'
-        });
-    }
     try {
-        // Vérification de l'existence du client
-        if (userOwnerId) {
-            const user = yield prisma.user.findUnique({ where: { id: userOwnerId } });
-            if (!user || user.role !== client_1.Role.CLIENT) {
-                return res.status(400).json({ error: 'Utilisateur invalide ou non client.' });
-            }
+        const { userOwnerId, parkingId, marque, model, prix, description, garantie, dureeGarantie, chauffeur, assurance, dureeAssurance, carteGrise, vignette, fuelType, mileage } = req.body;
+        // multer place les fichiers dans req.files
+        const photos = req.files.map(f => `/uploads/${f.filename}`);
+        if ((userOwnerId && parkingId) || (!userOwnerId && !parkingId)) {
+            return res.status(400).json({
+                error: "Un véhicule doit appartenir soit à un utilisateur (userOwnerId), soit à un parking (parkingId), mais pas aux deux ou aucun."
+            });
         }
-        // Vérification du parking
-        if (parkingId) {
-            const parking = yield prisma.parking.findUnique({ where: { id: parkingId } });
-            if (!parking) {
-                return res.status(400).json({ error: 'Parking non trouvé.' });
-            }
-        }
-        // Construction dynamique de l'objet data
-        const vehiculeData = {
-            marque,
-            model,
-            prix: Number(prix),
-            description,
-            photos,
-            garantie,
-            dureeGarantie: dureeGarantie ? Number(dureeGarantie) : null,
-            documents,
-            chauffeur, // Utilise la valeur fournie ou true par défaut
-            assurance,
-            dureeAssurance: dureeAssurance ? Number(dureeAssurance) : null,
-            carteGrise,
-            vignette,
-            fuelType,
-            mileage: mileage ? Number(mileage) : null,
-        };
-        if (userOwnerId)
-            vehiculeData.userOwnerId = userOwnerId;
-        if (parkingId)
-            vehiculeData.parkingId = parkingId;
-        // Création du véhicule
         const vehicule = yield prisma.vehicle.create({
-            data: vehiculeData
+            data: {
+                marque,
+                model,
+                prix: Number(prix),
+                description,
+                fuelType,
+                mileage: mileage ? Number(mileage) : null,
+                garantie: garantie === "true",
+                dureeGarantie: dureeGarantie ? Number(dureeGarantie) : null,
+                chauffeur: chauffeur === "true",
+                assurance,
+                dureeAssurance: dureeAssurance ? Number(dureeAssurance) : null,
+                carteGrise,
+                vignette,
+                photos,
+                userOwnerId: userOwnerId ? Number(userOwnerId) : undefined,
+                parkingId: parkingId ? Number(parkingId) : undefined,
+            }
         });
-        return res.status(201).json({ message: 'Véhicule enregistré avec succès', vehicule });
+        return res.status(201).json({ message: "Véhicule enregistré avec succès", vehicule });
     }
     catch (err) {
         console.error(err);
-        return res.status(500).json({
-            error: 'Erreur lors de la création du véhicule',
-            details: (err === null || err === void 0 ? void 0 : err.message) || err
-        });
+        return res.status(500).json({ error: "Erreur lors de la création du véhicule" });
     }
 });
 exports.createVehicule = createVehicule;

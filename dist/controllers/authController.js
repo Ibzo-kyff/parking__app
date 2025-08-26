@@ -171,6 +171,7 @@ const register = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
 });
 exports.register = register;
 const login = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
     try {
         const data = loginSchema.parse(req.body);
         const user = yield prisma.user.findUnique({
@@ -194,6 +195,12 @@ const login = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
             sameSite: 'strict',
             maxAge: 7 * 24 * 60 * 60 * 1000,
         });
+        const parking = user.role === "PARKING"
+            ? yield prisma.parking.findUnique({
+                where: { userId: user.id },
+                select: { id: true }
+            })
+            : null;
         return res.status(200).json({
             message: 'Connexion réussie',
             accessToken,
@@ -201,6 +208,8 @@ const login = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
             emailVerified: user.emailVerified,
             nom: user.nom,
             prenom: user.prenom,
+            id: user.id,
+            parkingId: (_a = parking === null || parking === void 0 ? void 0 : parking.id) !== null && _a !== void 0 ? _a : null
         });
     }
     catch (err) {
