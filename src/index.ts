@@ -13,8 +13,7 @@ const prisma = new PrismaClient();
 
 app.use(express.json());
 app.use(cookieParser());
-// Ajout pour servir le dossier public
-app.use('/public', express.static(path.join(__dirname, '../public')));
+
 // Ajout pour servir les dossiers statiques
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 app.use('/api/auth', authRoutes);

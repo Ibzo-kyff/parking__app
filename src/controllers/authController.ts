@@ -212,7 +212,13 @@ export const login = async (req: Request, res: Response) => {
       sameSite: 'strict',
       maxAge: 7 * 24 * 60 * 60 * 1000,
     });
-
+    
+    const parking = user.role === "PARKING"
+  ? await prisma.parking.findUnique({
+      where: { userId: user.id },
+      select: { id: true }
+    })
+  : null;
     return res.status(200).json({
       message: 'Connexion réussie',
       accessToken,
@@ -220,6 +226,8 @@ export const login = async (req: Request, res: Response) => {
       emailVerified: user.emailVerified,
       nom: user.nom,
       prenom: user.prenom,
+      id: user.id,
+      parkingId: parking?.id ?? null
     });
   } catch (err: unknown) {
     console.error(err);

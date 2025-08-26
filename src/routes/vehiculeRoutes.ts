@@ -11,10 +11,24 @@ import {
   getParkingStats,
   getParkingUserVehicles // Ajouter cette importation
 } from '../controllers/vehiculeController';
-import { upload } from '../middleware/validate';
 import { authenticateToken } from '../middleware/authMiddleware'; // Import du middleware d'authentification
+import multer from 'multer';
+import path from 'path';
 
 const router = Router();
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, path.join(__dirname, "../../uploads")); // Dossier uploads à la racine du projet
+  },
+  filename: (req, file, cb) => {
+    // Génère un nom unique
+    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
+    const ext = path.extname(file.originalname);
+    cb(null, uniqueSuffix + ext);
+  },
+});
+
+const upload = multer({ storage });
 
 // Routes spécifiques d'abord
 router.get('/marques', getDistinctMarques);
@@ -26,15 +40,8 @@ router.get('/parking/my-vehicles', authenticateToken, getParkingUserVehicles);
 router.get('/parking/stats', authenticateToken, getParkingStats);
 
 // Routes générales ensuite
-router.post('/', createVehicule);
+router.post("/", upload.array("photos"), createVehicule);
 router.get('/', getAllVehicules);
-router.post('/upload-image', upload.single('image'), (req, res) => {
-  if (!req.file) {
-    return res.status(400).json({ error: 'Aucun fichier envoyé.' });
-  }
-  const imageUrl = `/public/${req.file.filename}`;
-  return res.status(201).json({ message: 'Image uploadée avec succès', imageUrl });
-});
 
 // Routes paramétrées en dernier
 router.get('/:id', getVehiculeById);
