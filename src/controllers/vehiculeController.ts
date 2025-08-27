@@ -214,15 +214,37 @@ export const updateVehicule = async (req: Request, res: Response) => {
 // DELETE VEHICULE
 export const deleteVehicule = async (req: Request, res: Response) => {
   const { id } = req.params;
+  const vehiculeId = parseInt(id, 10);
+
+  if (isNaN(vehiculeId)) {
+    return res.status(400).json({ error: "ID invalide" });
+  }
 
   try {
+    // Supprimer d'abord les dépendances (si pas de cascade dans schema.prisma)
+    await prisma.reservation.deleteMany({ where: { vehicleId: vehiculeId } });
+    await prisma.vehicleHistory.deleteMany({ where: { vehicleId: vehiculeId } });
+    await prisma.favorite.deleteMany({ where: { vehicleId: vehiculeId } });
+    await prisma.vehicleStats.deleteMany({ where: { vehicleId: vehiculeId } });
+
+    // Puis supprimer le véhicule
     await prisma.vehicle.delete({
-      where: { id: parseInt(id) }
+      where: { id: vehiculeId }
     });
 
-    return res.json({ message: 'Véhicule supprimé avec succès' });
-  } catch (err) {
-    return res.status(500).json({ error: 'Erreur lors de la suppression du véhicule' });
+    return res.json({ message: "Véhicule supprimé avec succès" });
+  } catch (err: any) {
+    console.error("Erreur suppression véhicule:", err);
+
+    if (err.code === "P2025") {
+      return res.status(404).json({ error: "Véhicule introuvable" });
+    }
+
+    if (err.code === "P2003") {
+      return res.status(400).json({ error: "Impossible de supprimer : véhicule lié à d’autres données" });
+    }
+
+    return res.status(500).json({ error: "Erreur lors de la suppression du véhicule" });
   }
 };
 
