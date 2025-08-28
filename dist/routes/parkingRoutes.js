@@ -5,21 +5,24 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
 const parkingController_1 = require("../controllers/parkingController");
-const validate_1 = require("../middleware/validate");
+const multer_1 = __importDefault(require("multer"));
+const path_1 = __importDefault(require("path"));
 const router = express_1.default.Router();
-router.post('/', parkingController_1.createParking);
+// Config Multer
+const storage = multer_1.default.diskStorage({
+    destination: (req, file, cb) => {
+        cb(null, path_1.default.join(__dirname, "../../uploads"));
+    },
+    filename: (req, file, cb) => {
+        const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
+        const ext = path_1.default.extname(file.originalname);
+        cb(null, uniqueSuffix + ext);
+    },
+});
+const upload = (0, multer_1.default)({ storage });
+router.post('/', upload.single("logo"), parkingController_1.createParking);
 router.get('/', parkingController_1.getAllParkings);
 router.get('/:id', parkingController_1.getParkingById);
-router.put('/:id', parkingController_1.updateParking);
+router.put('/:id', upload.single("logo"), parkingController_1.updateParking);
 router.delete('/:id', parkingController_1.deleteParking);
-router.post('/upload-logo', validate_1.upload.fields([{ name: 'logo', maxCount: 1 }, { name: 'file', maxCount: 1 }]), (req, res) => {
-    var _a, _b;
-    const files = req.files;
-    const file = ((_a = files === null || files === void 0 ? void 0 : files.logo) === null || _a === void 0 ? void 0 : _a[0]) || ((_b = files === null || files === void 0 ? void 0 : files.file) === null || _b === void 0 ? void 0 : _b[0]);
-    if (!file) {
-        return res.status(400).json({ error: "Aucun fichier envoyé. Champs acceptés: 'logo' ou 'file'" });
-    }
-    const logoUrl = `/uploads/${file.filename}`;
-    return res.status(201).json({ message: 'Logo uploadé avec succès', logoUrl });
-});
 exports.default = router;

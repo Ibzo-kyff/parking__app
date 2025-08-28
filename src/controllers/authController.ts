@@ -559,7 +559,16 @@ export const getCurrentUser = async (req: AuthRequest, res: Response) => {
       return res.status(404).json({ message: 'Utilisateur non trouvé' });
     }
 
-    return res.status(200).json(user);
+    // Extraire l'accessToken de l'en-tête Authorization
+    const authHeader = req.headers.authorization;
+    const accessToken = authHeader && authHeader.startsWith('Bearer ') 
+      ? authHeader.split(' ')[1] 
+      : null;
+
+    return res.status(200).json({
+      ...user,
+      accessToken, // Inclure l'accessToken dans la réponse
+    });
   } catch (err: unknown) {
     console.error(err);
     return res.status(500).json({ message: 'Erreur serveur' });

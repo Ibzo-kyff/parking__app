@@ -8,40 +8,44 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.deleteParking = exports.updateParking = exports.getParkingById = exports.getAllParkings = exports.createParking = void 0;
 const client_1 = require("@prisma/client");
+const fs_1 = __importDefault(require("fs"));
+const path_1 = __importDefault(require("path"));
 const prisma = new client_1.PrismaClient();
 // CREATE PARKING
 const createParking = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { userId, name, address, phone, email, city, description, capacity, hoursOfOperation, status, } = req.body;
     try {
-        // Vérifie que l'utilisateur existe et a le rôle PARKING
-        const user = yield prisma.user.findUnique({ where: { id: userId } });
+        const user = yield prisma.user.findUnique({ where: { id: Number(userId) } });
         if (!user || user.role !== client_1.Role.PARKING) {
             return res.status(400).json({ error: "Utilisateur invalide ou non autorisé à gérer un parking." });
         }
         if (!city) {
             return res.status(400).json({ error: "Le champ 'city' est requis" });
         }
-        // Vérifie qu'un parking n'existe pas déjà pour cet utilisateur
-        const existingParking = yield prisma.parking.findUnique({ where: { userId } });
+        const existingParking = yield prisma.parking.findUnique({ where: { userId: Number(userId) } });
         if (existingParking) {
             return res.status(400).json({ error: "Un parking est déjà associé à cet utilisateur." });
         }
+        const logo = req.file ? `/uploads/${req.file.filename}` : undefined;
         const newParking = yield prisma.parking.create({
             data: {
-                userId,
+                userId: Number(userId),
                 name,
                 address,
                 phone,
                 city,
                 email,
                 description,
-                capacity,
+                capacity: capacity ? Number(capacity) : 0,
                 hoursOfOperation,
                 status: status || client_1.ParkingStatus.ACTIVE,
-                logo: req.body.logo || undefined
+                logo
             }
         });
         return res.status(201).json({ message: 'Parking créé avec succès', parking: newParking });
@@ -88,22 +92,42 @@ const updateParking = (req, res) => __awaiter(void 0, void 0, void 0, function* 
     const { id } = req.params;
     const { name, address, phone, city, email, description, capacity, hoursOfOperation, status } = req.body;
     try {
+        // Vérifier si parking existe
+        const parking = yield prisma.parking.findUnique({ where: { id: Number(id) } });
+        if (!parking) {
+            return res.status(404).json({ error: 'Parking non trouvé' });
+        }
+        let newLogo = parking.logo;
+        if (req.file) {
+            // Supprimer ancien logo si existant
+            if (parking.logo) {
+                const oldPath = path_1.default.join(__dirname, "../../", parking.logo);
+                if (fs_1.default.existsSync(oldPath)) {
+                    fs_1.default.unlinkSync(oldPath);
+                }
+            }
+            newLogo = `/uploads/${req.file.filename}`;
+        }
         const updatedParking = yield prisma.parking.update({
-            where: { id: parseInt(id) },
-            data: Object.assign({ name,
+            where: { id: Number(id) },
+            data: {
+                name,
                 address,
                 phone,
                 city,
                 email,
                 description,
-                capacity,
+                capacity: capacity ? Number(capacity) : 0,
                 hoursOfOperation,
-                status }, (req.body.logo && { logo: req.body.logo }))
+                status,
+                logo: newLogo
+            }
         });
         return res.json({ message: 'Parking mis à jour', parking: updatedParking });
     }
     catch (err) {
-        return res.status(500).json({ error: 'Erreur lors de la mise à jour du parking' });
+        console.error(err);
+        return res.status(500).json({ error: 'Erreur lors de la mise à jour du parking', details: err.message || err });
     }
 });
 exports.updateParking = updateParking;
