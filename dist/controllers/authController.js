@@ -516,7 +516,12 @@ const getCurrentUser = (req, res) => __awaiter(void 0, void 0, void 0, function*
         if (!user) {
             return res.status(404).json({ message: 'Utilisateur non trouvé' });
         }
-        return res.status(200).json(user);
+        // Extraire l'accessToken de l'en-tête Authorization
+        const authHeader = req.headers.authorization;
+        const accessToken = authHeader && authHeader.startsWith('Bearer ')
+            ? authHeader.split(' ')[1]
+            : null;
+        return res.status(200).json(Object.assign(Object.assign({}, user), { accessToken }));
     }
     catch (err) {
         console.error(err);
