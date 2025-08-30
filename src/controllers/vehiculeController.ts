@@ -22,48 +22,81 @@ export const createVehicule = async (req: Request, res: Response) => {
       carteGrise,
       vignette,
       fuelType,
-      mileage
+      mileage,
     } = req.body;
 
-    // multer place les fichiers dans req.files
-    const photos = (req.files as Express.Multer.File[]).map(
-      f => `/uploads/${f.filename}`
-    );
+    // Ajouter un log pour voir les données reçues
+    console.log("Données reçues dans req.body :", req.body);
+
+    // Validation des champs obligatoires
+    if (!marque || !model || !prix) {
+      return res.status(400).json({ error: "Les champs marque, modèle et prix sont obligatoires." });
+    }
 
     if ((userOwnerId && parkingId) || (!userOwnerId && !parkingId)) {
       return res.status(400).json({
-        error: "Un véhicule doit appartenir soit à un utilisateur (userOwnerId), soit à un parking (parkingId), mais pas aux deux ou aucun."
+        error: "Un véhicule doit appartenir soit à un utilisateur (userOwnerId), soit à un parking (parkingId), mais pas aux deux ou aucun.",
       });
     }
+
+    // Valider le format des champs booléens
+    const parsedGarantie = garantie === "true" ? true : false;
+    const parsedChauffeur = chauffeur === "true" ? true : false;
+    const parsedAssurance = assurance === "true" ? true : false;
+    const parsedCarteGrise = carteGrise === "true" ? true : false;
+    const parsedVignette = vignette === "true" ? true : false;
+
+    // Valider le format des champs numériques
+    const parsedPrix = Number(prix);
+    if (isNaN(parsedPrix)) {
+      return res.status(400).json({ error: "Le prix doit être un nombre valide." });
+    }
+
+    const parsedDureeGarantie = dureeGarantie ? Number(dureeGarantie) : null;
+    if (parsedGarantie && !parsedDureeGarantie) {
+      return res.status(400).json({ error: "La durée de garantie est obligatoire si la garantie est activée." });
+    }
+
+    const parsedDureeAssurance = dureeAssurance ? Number(dureeAssurance) : null;
+    if (parsedAssurance && !parsedDureeAssurance) {
+      return res.status(400).json({ error: "La durée d'assurance est obligatoire si l'assurance est activée." });
+    }
+
+    const parsedMileage = mileage ? Number(mileage) : null;
+
+    // multer place les fichiers dans req.files
+    const photos = (req.files as Express.Multer.File[])?.map((f) => `/uploads/${f.filename}`) || [];
 
     const vehicule = await prisma.vehicle.create({
       data: {
         marque,
         model,
-        prix: Number(prix),
-        description,
+        prix: parsedPrix,
+        description: description || "",
         fuelType,
-        mileage: mileage ? Number(mileage) : null,
-        garantie: garantie === "true",
-        dureeGarantie: dureeGarantie ? Number(dureeGarantie) : null,
-        chauffeur: chauffeur === "true",
-        assurance,
-        dureeAssurance: dureeAssurance ? Number(dureeAssurance) : null,
-        carteGrise,
-        vignette,
+        mileage: parsedMileage,
+        garantie: parsedGarantie,
+        dureeGarantie: parsedDureeGarantie,
+        chauffeur: parsedChauffeur,
+        assurance: parsedAssurance,
+        dureeAssurance: parsedDureeAssurance,
+        carteGrise: parsedCarteGrise,
+        vignette: parsedVignette,
         photos,
         userOwnerId: userOwnerId ? Number(userOwnerId) : undefined,
         parkingId: parkingId ? Number(parkingId) : undefined,
-      }
+      },
     });
 
     return res.status(201).json({ message: "Véhicule enregistré avec succès", vehicule });
   } catch (err) {
-    console.error(err);
-    return res.status(500).json({ error: "Erreur lors de la création du véhicule" });
+    console.error("Erreur lors de la création du véhicule :", err);
+    return res.status(500).json({ 
+      error: "Erreur lors de la création du véhicule", 
+      details: err instanceof Error ? err.message : "Erreur inconnue" 
+    });
   }
 };
-
 // GET ALL VEHICULES WITH FILTERS
 export const getAllVehicules = async (req: Request, res: Response) => {
   const {
@@ -274,11 +307,11 @@ export const getDistinctModels = async (_req: Request, res: Response) => {
   }
 };
 
-// GET RECENT PARKINGS IMAGES (LAST 4 ADDED PARKINGS WITH THEIR PHOTOS/LOGOS)
+// GET RECENT PARKINGS IMAGES 
 export const getRecentParkings = async (_req: Request, res: Response) => {
   try {
     const parkings = await prisma.parking.findMany({
-      orderBy: { createdAt: 'desc' }, // Assumes parking has a createdAt field
+      orderBy: { createdAt: 'desc' }, 
       take: 4,
       select: {
         id: true,
@@ -293,7 +326,7 @@ export const getRecentParkings = async (_req: Request, res: Response) => {
 // GET VEHICLES FOR PARKING USER WITH STATS
 export const getParkingUserVehicles = async (req: AuthRequest, res: Response) => {
   try {
-    // Vérifier que l'utilisateur est authentifié et a le rôle PARKING
+    
     if (!req.user || req.user.role !== Role.PARKING) {
       return res.status(403).json({ 
         error: 'Accès refusé. Seuls les utilisateurs PARKING peuvent accéder à cette ressource.' 
@@ -321,7 +354,6 @@ export const getParkingUserVehicles = async (req: AuthRequest, res: Response) =>
         parkingId: parking.id 
       },
       include: {
-        // Inclure les informations du propriétaire si nécessaire
         userOwner: {
           select: {
             id: true,
@@ -331,21 +363,18 @@ export const getParkingUserVehicles = async (req: AuthRequest, res: Response) =>
             phone: true
           }
         },
-        // Inclure les statistiques de base
         stats: {
           select: {
             vues: true,
             reservations: true
           }
         },
-        // Inclure les favoris pour les statistiques
         favorites: {
           select: {
             id: true,
             userId: true
           }
         },
-        // Inclure les réservations pour les statistiques détaillées
         reservations: {
           select: {
             id: true,
