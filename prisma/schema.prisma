@@ -77,14 +77,14 @@ model Vehicle {
   prix                Float
   description         String
   photos              String[]
-  garantie            Boolean
+  garantie            Boolean   @default(false)
   dureeGarantie       Int?
   documents           String[]  // URLs des documents généraux
-  chauffeur           Boolean
-  assurance           String?   // URL ou identifiant du document d'assurance
+  chauffeur           Boolean   @default(false)
+  assurance           Boolean   @default(false)
   dureeAssurance      Int?      // Durée de validité de l'assurance en mois
-  carteGrise          String?   // URL ou identifiant de la carte grise
-  vignette            String?   // URL ou identifiant de la vignette
+  carteGrise          Boolean   @default(false)
+  vignette            Boolean   @default(false) 
   status              VehicleStatus @default(DISPONIBLE)
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt

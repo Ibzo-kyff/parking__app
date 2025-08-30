@@ -14,40 +14,70 @@ const client_1 = require("@prisma/client");
 const prisma = new client_1.PrismaClient();
 // CREATE VEHICULE
 const createVehicule = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
     try {
-        const { userOwnerId, parkingId, marque, model, prix, description, garantie, dureeGarantie, chauffeur, assurance, dureeAssurance, carteGrise, vignette, fuelType, mileage } = req.body;
-        // multer place les fichiers dans req.files
-        const photos = req.files.map(f => `/uploads/${f.filename}`);
+        const { userOwnerId, parkingId, marque, model, prix, description, garantie, dureeGarantie, chauffeur, assurance, dureeAssurance, carteGrise, vignette, fuelType, mileage, } = req.body;
+        // Ajouter un log pour voir les données reçues
+        console.log("Données reçues dans req.body :", req.body);
+        // Validation des champs obligatoires
+        if (!marque || !model || !prix) {
+            return res.status(400).json({ error: "Les champs marque, modèle et prix sont obligatoires." });
+        }
         if ((userOwnerId && parkingId) || (!userOwnerId && !parkingId)) {
             return res.status(400).json({
-                error: "Un véhicule doit appartenir soit à un utilisateur (userOwnerId), soit à un parking (parkingId), mais pas aux deux ou aucun."
+                error: "Un véhicule doit appartenir soit à un utilisateur (userOwnerId), soit à un parking (parkingId), mais pas aux deux ou aucun.",
             });
         }
+        // Valider le format des champs booléens
+        const parsedGarantie = garantie === "true" ? true : false;
+        const parsedChauffeur = chauffeur === "true" ? true : false;
+        const parsedAssurance = assurance === "true" ? true : false;
+        const parsedCarteGrise = carteGrise === "true" ? true : false;
+        const parsedVignette = vignette === "true" ? true : false;
+        // Valider le format des champs numériques
+        const parsedPrix = Number(prix);
+        if (isNaN(parsedPrix)) {
+            return res.status(400).json({ error: "Le prix doit être un nombre valide." });
+        }
+        const parsedDureeGarantie = dureeGarantie ? Number(dureeGarantie) : null;
+        if (parsedGarantie && !parsedDureeGarantie) {
+            return res.status(400).json({ error: "La durée de garantie est obligatoire si la garantie est activée." });
+        }
+        const parsedDureeAssurance = dureeAssurance ? Number(dureeAssurance) : null;
+        if (parsedAssurance && !parsedDureeAssurance) {
+            return res.status(400).json({ error: "La durée d'assurance est obligatoire si l'assurance est activée." });
+        }
+        const parsedMileage = mileage ? Number(mileage) : null;
+        // multer place les fichiers dans req.files
+        const photos = ((_a = req.files) === null || _a === void 0 ? void 0 : _a.map((f) => `/uploads/${f.filename}`)) || [];
         const vehicule = yield prisma.vehicle.create({
             data: {
                 marque,
                 model,
-                prix: Number(prix),
-                description,
+                prix: parsedPrix,
+                description: description || "",
                 fuelType,
-                mileage: mileage ? Number(mileage) : null,
-                garantie: garantie === "true",
-                dureeGarantie: dureeGarantie ? Number(dureeGarantie) : null,
-                chauffeur: chauffeur === "true",
-                assurance,
-                dureeAssurance: dureeAssurance ? Number(dureeAssurance) : null,
-                carteGrise,
-                vignette,
+                mileage: parsedMileage,
+                garantie: parsedGarantie,
+                dureeGarantie: parsedDureeGarantie,
+                chauffeur: parsedChauffeur,
+                assurance: parsedAssurance,
+                dureeAssurance: parsedDureeAssurance,
+                carteGrise: parsedCarteGrise,
+                vignette: parsedVignette,
                 photos,
                 userOwnerId: userOwnerId ? Number(userOwnerId) : undefined,
                 parkingId: parkingId ? Number(parkingId) : undefined,
-            }
+            },
         });
         return res.status(201).json({ message: "Véhicule enregistré avec succès", vehicule });
     }
     catch (err) {
-        console.error(err);
-        return res.status(500).json({ error: "Erreur lors de la création du véhicule" });
+        console.error("Erreur lors de la création du véhicule :", err);
+        return res.status(500).json({
+            error: "Erreur lors de la création du véhicule",
+            details: err instanceof Error ? err.message : "Erreur inconnue"
+        });
     }
 });
 exports.createVehicule = createVehicule;
@@ -162,14 +192,31 @@ exports.updateVehicule = updateVehicule;
 // DELETE VEHICULE
 const deleteVehicule = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { id } = req.params;
+    const vehiculeId = parseInt(id, 10);
+    if (isNaN(vehiculeId)) {
+        return res.status(400).json({ error: "ID invalide" });
+    }
     try {
+        // Supprimer d'abord les dépendances (si pas de cascade dans schema.prisma)
+        yield prisma.reservation.deleteMany({ where: { vehicleId: vehiculeId } });
+        yield prisma.vehicleHistory.deleteMany({ where: { vehicleId: vehiculeId } });
+        yield prisma.favorite.deleteMany({ where: { vehicleId: vehiculeId } });
+        yield prisma.vehicleStats.deleteMany({ where: { vehicleId: vehiculeId } });
+        // Puis supprimer le véhicule
         yield prisma.vehicle.delete({
-            where: { id: parseInt(id) }
+            where: { id: vehiculeId }
         });
-        return res.json({ message: 'Véhicule supprimé avec succès' });
+        return res.json({ message: "Véhicule supprimé avec succès" });
     }
     catch (err) {
-        return res.status(500).json({ error: 'Erreur lors de la suppression du véhicule' });
+        console.error("Erreur suppression véhicule:", err);
+        if (err.code === "P2025") {
+            return res.status(404).json({ error: "Véhicule introuvable" });
+        }
+        if (err.code === "P2003") {
+            return res.status(400).json({ error: "Impossible de supprimer : véhicule lié à d’autres données" });
+        }
+        return res.status(500).json({ error: "Erreur lors de la suppression du véhicule" });
     }
 });
 exports.deleteVehicule = deleteVehicule;
@@ -201,11 +248,11 @@ const getDistinctModels = (_req, res) => __awaiter(void 0, void 0, void 0, funct
     }
 });
 exports.getDistinctModels = getDistinctModels;
-// GET RECENT PARKINGS IMAGES (LAST 4 ADDED PARKINGS WITH THEIR PHOTOS/LOGOS)
+// GET RECENT PARKINGS IMAGES 
 const getRecentParkings = (_req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const parkings = yield prisma.parking.findMany({
-            orderBy: { createdAt: 'desc' }, // Assumes parking has a createdAt field
+            orderBy: { createdAt: 'desc' },
             take: 4,
             select: {
                 id: true,
@@ -222,7 +269,6 @@ exports.getRecentParkings = getRecentParkings;
 // GET VEHICLES FOR PARKING USER WITH STATS
 const getParkingUserVehicles = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        // Vérifier que l'utilisateur est authentifié et a le rôle PARKING
         if (!req.user || req.user.role !== client_1.Role.PARKING) {
             return res.status(403).json({
                 error: 'Accès refusé. Seuls les utilisateurs PARKING peuvent accéder à cette ressource.'
@@ -246,7 +292,6 @@ const getParkingUserVehicles = (req, res) => __awaiter(void 0, void 0, void 0, f
                 parkingId: parking.id
             },
             include: {
-                // Inclure les informations du propriétaire si nécessaire
                 userOwner: {
                     select: {
                         id: true,
@@ -256,21 +301,18 @@ const getParkingUserVehicles = (req, res) => __awaiter(void 0, void 0, void 0, f
                         phone: true
                     }
                 },
-                // Inclure les statistiques de base
                 stats: {
                     select: {
                         vues: true,
                         reservations: true
                     }
                 },
-                // Inclure les favoris pour les statistiques
                 favorites: {
                     select: {
                         id: true,
                         userId: true
                     }
                 },
-                // Inclure les réservations pour les statistiques détaillées
                 reservations: {
                     select: {
                         id: true,
