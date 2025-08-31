@@ -5,18 +5,18 @@
       "src": "dist/index.js",
       "use": "@vercel/node",
       "config": {
-        "includeFiles": ["dist/**", "prisma/**", "Uploads/**"]
+        "includeFiles": ["dist/**", "prisma/**", "uploads/**"]
       }
     },
     {
-      "src": "Uploads/**/*",
+      "src": "uploads/**/*",
       "use": "@vercel/static"
     }
   ],
   "routes": [
     {
       "src": "/uploads/(.*)",
-      "dest": "/Uploads/$1"
+      "dest": "/uploads/$1"
     },
     {
       "src": "/api/(.*)",
