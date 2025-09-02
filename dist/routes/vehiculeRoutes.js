@@ -32,7 +32,9 @@ router.get('/parking/stats', authMiddleware_1.authenticateToken, vehiculeControl
 router.post("/", upload.array("photos"), vehiculeController_1.createVehicule);
 router.get('/', vehiculeController_1.getAllVehicules);
 // Routes paramétrées en dernier
+router.get('/parking/management', authMiddleware_1.authenticateToken, vehiculeController_1.getParkingManagementData);
 router.get('/:id', vehiculeController_1.getVehiculeById);
+router.get('/parking/my-vehicles/:id', authMiddleware_1.authenticateToken, vehiculeController_1.getParkingUserVehicleById);
 router.put('/:id', vehiculeController_1.updateVehicule);
 router.delete('/:id', vehiculeController_1.deleteVehicule);
 exports.default = router;
