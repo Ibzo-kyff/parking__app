@@ -281,14 +281,17 @@ export const deleteVehicule = async (req: Request, res: Response) => {
   }
 };
 
-// GET DISTINCT MARQUES
 export const getDistinctMarques = async (_req: Request, res: Response) => {
   try {
     const marques = await prisma.vehicle.findMany({
-      select: { marque: true },
-      distinct: ['marque']
+      distinct: ['marque'],
+      select: {
+        id: true,
+        marque: true,
+      },
     });
-    return res.json(marques.map((v) => v.marque));
+
+    return res.json(marques);
   } catch (err) {
     return res.status(500).json({ error: 'Erreur lors de la récupération des marques' });
   }
