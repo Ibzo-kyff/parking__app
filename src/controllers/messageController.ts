@@ -97,6 +97,47 @@ export const getUserConversations = async (req: AuthRequest, res: Response) => {
     res.status(500).json({ message: 'Erreur lors de la récupération des conversations', error });
   }
 };
+// ✅ Mettre à jour un message
+export const updateMessage = async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    const messageId = parseInt(req.params.id);
+    const { content } = req.body;
+
+    if (!userId) {
+      return res.status(401).json({ message: 'Utilisateur non authentifié' });
+    }
+
+    if (!content || typeof content !== 'string' || content.trim() === '') {
+      return res.status(400).json({ message: 'Le contenu du message est obligatoire' });
+    }
+
+    const message = await prisma.message.findUnique({ where: { id: messageId } });
+
+    if (!message) {
+      return res.status(404).json({ message: 'Message introuvable' });
+    }
+
+    if (message.senderId !== userId) {
+      return res.status(403).json({ message: 'Vous ne pouvez modifier que vos propres messages' });
+    }
+
+    const updatedMessage = await prisma.message.update({
+      where: { id: messageId },
+      data: { content },
+      include: { sender: true, receiver: true },
+    });
+
+    // 🔔 Notifier les deux utilisateurs de la mise à jour
+    io.to(`user_${message.receiverId}`).emit("updateMessage", updatedMessage);
+    io.to(`user_${message.senderId}`).emit("updateMessage", updatedMessage);
+
+    res.json(updatedMessage);
+  } catch (error) {
+    console.error("Erreur updateMessage:", error);
+    res.status(500).json({ message: 'Erreur lors de la mise à jour du message', error });
+  }
+};
 
 // ✅ Supprimer un message
 export const deleteMessage = async (req: AuthRequest, res: Response) => {

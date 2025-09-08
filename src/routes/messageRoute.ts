@@ -5,6 +5,7 @@ import {
   getConversation,
   getUserConversations,
   deleteMessage,
+  updateMessage,
 } from '../controllers/messageController';
 import { authenticateToken } from '../middleware/authMiddleware';
 
@@ -21,7 +22,7 @@ router.get('/conversation/:userId', getConversation);
 
 // Récupérer toutes les conversations de l’utilisateur connecté
 router.get('/conversations', getUserConversations);
-
+router.put('/:id', updateMessage);
 // Supprimer un message
 router.delete('/:id', deleteMessage);
 
