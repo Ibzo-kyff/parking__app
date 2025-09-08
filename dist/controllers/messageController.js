@@ -9,7 +9,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.deleteMessage = exports.getUserConversations = exports.getConversation = exports.sendMessage = void 0;
+exports.deleteMessage = exports.updateMessage = exports.getUserConversations = exports.getConversation = exports.sendMessage = void 0;
 const client_1 = require("@prisma/client");
 const index_1 = require("../index"); // ⚡ import de socket.io
 const prisma = new client_1.PrismaClient();
@@ -97,6 +97,42 @@ const getUserConversations = (req, res) => __awaiter(void 0, void 0, void 0, fun
     }
 });
 exports.getUserConversations = getUserConversations;
+// ✅ Mettre à jour un message
+const updateMessage = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
+    try {
+        const userId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.id;
+        const messageId = parseInt(req.params.id);
+        const { content } = req.body;
+        if (!userId) {
+            return res.status(401).json({ message: 'Utilisateur non authentifié' });
+        }
+        if (!content || typeof content !== 'string' || content.trim() === '') {
+            return res.status(400).json({ message: 'Le contenu du message est obligatoire' });
+        }
+        const message = yield prisma.message.findUnique({ where: { id: messageId } });
+        if (!message) {
+            return res.status(404).json({ message: 'Message introuvable' });
+        }
+        if (message.senderId !== userId) {
+            return res.status(403).json({ message: 'Vous ne pouvez modifier que vos propres messages' });
+        }
+        const updatedMessage = yield prisma.message.update({
+            where: { id: messageId },
+            data: { content },
+            include: { sender: true, receiver: true },
+        });
+        // 🔔 Notifier les deux utilisateurs de la mise à jour
+        index_1.io.to(`user_${message.receiverId}`).emit("updateMessage", updatedMessage);
+        index_1.io.to(`user_${message.senderId}`).emit("updateMessage", updatedMessage);
+        res.json(updatedMessage);
+    }
+    catch (error) {
+        console.error("Erreur updateMessage:", error);
+        res.status(500).json({ message: 'Erreur lors de la mise à jour du message', error });
+    }
+});
+exports.updateMessage = updateMessage;
 // ✅ Supprimer un message
 const deleteMessage = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a;

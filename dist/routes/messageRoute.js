@@ -16,6 +16,7 @@ router.post('/', messageController_1.sendMessage);
 router.get('/conversation/:userId', messageController_1.getConversation);
 // Récupérer toutes les conversations de l’utilisateur connecté
 router.get('/conversations', messageController_1.getUserConversations);
+router.put('/:id', messageController_1.updateMessage);
 // Supprimer un message
 router.delete('/:id', messageController_1.deleteMessage);
 exports.default = router;
