@@ -95,7 +95,7 @@ const selfUpdateSchema = zod_1.z.object({
     phone: zod_1.z.string().min(8).max(15).optional(),
     nom: zod_1.z.string().min(1).optional(),
     prenom: zod_1.z.string().min(1).optional(),
-    image: zod_1.z.string().url().optional(),
+    image: zod_1.z.string().optional(),
     address: zod_1.z.string().optional(),
     password: zod_1.z.string().min(6).optional(),
 });
@@ -222,7 +222,7 @@ const login = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
 });
 exports.login = login;
 const refreshTokenHandler = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    const refreshToken = req.cookies.refreshToken;
+    const refreshToken = req.cookies.refreshToken; // Récupérer du cookie
     if (!refreshToken) {
         return res.status(401).json({ message: 'Refresh token manquant' });
     }
@@ -240,6 +240,7 @@ const refreshTokenHandler = (req, res) => __awaiter(void 0, void 0, void 0, func
             where: { id: user.id },
             data: { refreshToken: newRefreshToken },
         });
+        // Mettre à jour le cookie avec le nouveau refreshToken
         res.cookie('refreshToken', newRefreshToken, {
             httpOnly: true,
             secure: process.env.NODE_ENV === 'production',
