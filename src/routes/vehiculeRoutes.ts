@@ -9,7 +9,9 @@ import {
   getDistinctModels,
   getRecentParkings,
   getParkingStats,
-  getParkingUserVehicles // Ajouter cette importation
+  getParkingUserVehicles, // Ajouter cette importation
+  getParkingUserVehicleById,
+  getParkingManagementData
 } from '../controllers/vehiculeController';
 import { authenticateToken } from '../middleware/authMiddleware'; // Import du middleware d'authentification
 import multer from 'multer';
@@ -44,7 +46,9 @@ router.post("/", upload.array("photos"), createVehicule);
 router.get('/', getAllVehicules);
 
 // Routes paramétrées en dernier
+router.get('/parking/management', authenticateToken, getParkingManagementData);
 router.get('/:id', getVehiculeById);
+router.get('/parking/my-vehicles/:id', authenticateToken, getParkingUserVehicleById);
 router.put('/:id', updateVehicule);
 router.delete('/:id', deleteVehicule);
 

@@ -4,7 +4,6 @@ import bcrypt from 'bcrypt';
 import { z } from 'zod';
 import jwt from 'jsonwebtoken';
 import { generateAccessToken, generateRefreshToken } from '../utils/jwtUtils';
-import crypto from 'crypto';
 import nodemailer from 'nodemailer';
 import { JwtPayload } from 'jsonwebtoken';
 import fs from 'fs';
@@ -98,7 +97,7 @@ const selfUpdateSchema = z.object({
   phone: z.string().min(8).max(15).optional(),
   nom: z.string().min(1).optional(),
   prenom: z.string().min(1).optional(),
-  image: z.string().url().optional(),
+  image: z.string().optional(),
   address: z.string().optional(),
   password: z.string().min(6).optional(),
 });
@@ -239,7 +238,7 @@ export const login = async (req: Request, res: Response) => {
 };
 
 export const refreshTokenHandler = async (req: Request, res: Response) => {
-  const refreshToken = req.cookies.refreshToken;
+  const refreshToken = req.cookies.refreshToken; // Récupérer du cookie
   if (!refreshToken) {
     return res.status(401).json({ message: 'Refresh token manquant' });
   }
@@ -262,6 +261,7 @@ export const refreshTokenHandler = async (req: Request, res: Response) => {
       data: { refreshToken: newRefreshToken },
     });
 
+    // Mettre à jour le cookie avec le nouveau refreshToken
     res.cookie('refreshToken', newRefreshToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
