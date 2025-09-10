@@ -250,7 +250,7 @@ const getDistinctModels = (_req, res) => __awaiter(void 0, void 0, void 0, funct
     }
 });
 exports.getDistinctModels = getDistinctModels;
-// GET RECENT PARKINGS IMAGES 
+// GET RECENT PARKINGS IMAGES
 const getRecentParkings = (_req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const parkings = yield prisma.parking.findMany({

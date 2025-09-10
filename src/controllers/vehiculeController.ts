@@ -91,9 +91,9 @@ export const createVehicule = async (req: Request, res: Response) => {
     return res.status(201).json({ message: "Véhicule enregistré avec succès", vehicule });
   } catch (err) {
     console.error("Erreur lors de la création du véhicule :", err);
-    return res.status(500).json({ 
-      error: "Erreur lors de la création du véhicule", 
-      details: err instanceof Error ? err.message : "Erreur inconnue" 
+    return res.status(500).json({
+      error: "Erreur lors de la création du véhicule",
+      details: err instanceof Error ? err.message : "Erreur inconnue"
     });
   }
 };
@@ -310,11 +310,11 @@ export const getDistinctModels = async (_req: Request, res: Response) => {
   }
 };
 
-// GET RECENT PARKINGS IMAGES 
+// GET RECENT PARKINGS IMAGES
 export const getRecentParkings = async (_req: Request, res: Response) => {
   try {
     const parkings = await prisma.parking.findMany({
-      orderBy: { createdAt: 'desc' }, 
+      orderBy: { createdAt: 'desc' },
       take: 4,
       select: {
         id: true,
@@ -329,10 +329,9 @@ export const getRecentParkings = async (_req: Request, res: Response) => {
 // GET VEHICLES FOR PARKING USER WITH STATS
 export const getParkingUserVehicles = async (req: AuthRequest, res: Response) => {
   try {
-    
     if (!req.user || req.user.role !== Role.PARKING) {
-      return res.status(403).json({ 
-        error: 'Accès refusé. Seuls les utilisateurs PARKING peuvent accéder à cette ressource.' 
+      return res.status(403).json({
+        error: 'Accès refusé. Seuls les utilisateurs PARKING peuvent accéder à cette ressource.'
       });
     }
 
@@ -346,15 +345,15 @@ export const getParkingUserVehicles = async (req: AuthRequest, res: Response) =>
     });
 
     if (!parking) {
-      return res.status(404).json({ 
-        error: 'Aucun parking trouvé pour cet utilisateur.' 
+      return res.status(404).json({
+        error: 'Aucun parking trouvé pour cet utilisateur.'
       });
     }
 
     // Récupérer les véhicules du parking avec les relations nécessaires
     const vehicles = await prisma.vehicle.findMany({
-      where: { 
-        parkingId: parking.id 
+      where: {
+        parkingId: parking.id
       },
       include: {
         userOwner: {
@@ -412,7 +411,7 @@ export const getParkingUserVehicles = async (req: AuthRequest, res: Response) =>
         vues: vehicle.stats?.vues || 0,
         reservations: vehicle.stats?.reservations || 0,
         favoris: vehicle.favorites.length,
-        reservationsActives: vehicle.reservations.filter(r => 
+        reservationsActives: vehicle.reservations.filter(r =>
           new Date(r.dateFin) > new Date()
         ).length
       }
@@ -429,7 +428,7 @@ export const getParkingUserVehicles = async (req: AuthRequest, res: Response) =>
 
   } catch (err) {
     console.error('Erreur lors de la récupération des véhicules du parking:', err);
-    return res.status(500).json({ 
+    return res.status(500).json({
       error: 'Erreur lors de la récupération des véhicules du parking',
       details: err instanceof Error ? err.message : 'Erreur inconnue'
     });
@@ -439,8 +438,8 @@ export const getParkingUserVehicles = async (req: AuthRequest, res: Response) =>
 export const getParkingStats = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user || req.user.role !== Role.PARKING) {
-      return res.status(403).json({ 
-        error: 'Accès refusé' 
+      return res.status(403).json({
+        error: 'Accès refusé'
       });
     }
 
