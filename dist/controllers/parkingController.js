@@ -14,7 +14,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.deleteParking = exports.updateParking = exports.getParkingById = exports.getAllParkings = exports.createParking = void 0;
 const client_1 = require("@prisma/client");
-const fs_1 = __importDefault(require("fs"));
+const blob_1 = require("@vercel/blob");
 const path_1 = __importDefault(require("path"));
 const prisma = new client_1.PrismaClient();
 // CREATE PARKING
@@ -32,7 +32,16 @@ const createParking = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         if (existingParking) {
             return res.status(400).json({ error: "Un parking est déjà associé à cet utilisateur." });
         }
-        const logo = req.file ? `/uploads/${req.file.filename}` : undefined;
+        let logo;
+        if (req.file) {
+            // Upload vers Vercel Blob
+            const newFilename = `${Date.now()}-${Math.round(Math.random() * 1e9)}${req.file.originalname ? path_1.default.extname(req.file.originalname) : '.png'}`; // Utilisez path si importé, sinon adaptez
+            const result = yield (0, blob_1.put)(newFilename, req.file.buffer, {
+                access: 'public',
+                token: process.env.BLOB_READ_WRITE_TOKEN,
+            });
+            logo = result.url;
+        }
         const newParking = yield prisma.parking.create({
             data: {
                 userId: Number(userId),
@@ -56,7 +65,7 @@ const createParking = (req, res) => __awaiter(void 0, void 0, void 0, function* 
     }
 });
 exports.createParking = createParking;
-// GET ALL PARKINGS
+// GET ALL PARKINGS (inchangé)
 const getAllParkings = (_req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const parkings = yield prisma.parking.findMany({
@@ -69,7 +78,7 @@ const getAllParkings = (_req, res) => __awaiter(void 0, void 0, void 0, function
     }
 });
 exports.getAllParkings = getAllParkings;
-// GET PARKING BY ID
+// GET PARKING BY ID (inchangé)
 const getParkingById = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { id } = req.params;
     try {
@@ -99,14 +108,19 @@ const updateParking = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         }
         let newLogo = parking.logo;
         if (req.file) {
-            // Supprimer ancien logo si existant
+            // Supprimer l'ancien logo si existant (optionnel, pour nettoyer le storage)
             if (parking.logo) {
-                const oldPath = path_1.default.join(__dirname, "../../", parking.logo);
-                if (fs_1.default.existsSync(oldPath)) {
-                    fs_1.default.unlinkSync(oldPath);
-                }
+                // Extraire le pathname de l'URL blob (ex. : /uploads/filename.png)
+                const url = new URL(parking.logo);
+                yield (0, blob_1.del)(url.pathname.slice(1)); // del() supprime le blob par son chemin
             }
-            newLogo = `/uploads/${req.file.filename}`;
+            // Upload nouveau logo vers Vercel Blob
+            const newFilename = `${Date.now()}-${Math.round(Math.random() * 1e9)}${req.file.originalname ? path_1.default.extname(req.file.originalname) : '.png'}`;
+            const result = yield (0, blob_1.put)(newFilename, req.file.buffer, {
+                access: 'public',
+                token: process.env.BLOB_READ_WRITE_TOKEN,
+            });
+            newLogo = result.url;
         }
         const updatedParking = yield prisma.parking.update({
             where: { id: Number(id) },
@@ -131,10 +145,16 @@ const updateParking = (req, res) => __awaiter(void 0, void 0, void 0, function* 
     }
 });
 exports.updateParking = updateParking;
-// DELETE PARKING
+// DELETE PARKING (optionnel : ajoutez suppression du logo si besoin)
 const deleteParking = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { id } = req.params;
     try {
+        const parking = yield prisma.parking.findUnique({ where: { id: parseInt(id) } });
+        if (parking && parking.logo) {
+            // Supprimer le logo du blob
+            const url = new URL(parking.logo);
+            yield (0, blob_1.del)(url.pathname.slice(1));
+        }
         yield prisma.parking.delete({ where: { id: parseInt(id) } });
         return res.json({ message: 'Parking supprimé avec succès' });
     }
