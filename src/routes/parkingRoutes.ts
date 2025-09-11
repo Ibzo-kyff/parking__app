@@ -7,21 +7,12 @@ import {
   deleteParking
 } from '../controllers/parkingController';
 import multer from 'multer';
-import path from 'path';
+// Supprimez 'path' si plus utilisé, ou gardez-le si besoin ailleurs
 
 const router = express.Router();
 
-// Config Multer
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, path.join(__dirname, "../../uploads"));
-  },
-  filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
-    const ext = path.extname(file.originalname);
-    cb(null, uniqueSuffix + ext);
-  },
-});
+// Config Multer en mémoire (buffer) pour Vercel
+const storage = multer.memoryStorage(); // Changement ici : pas de diskStorage
 const upload = multer({ storage });
 
 router.post('/', upload.single("logo"), createParking);
