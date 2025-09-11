@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { PrismaClient, ParkingStatus, Role } from '@prisma/client';
-import fs from 'fs';
+import { put, del } from '@vercel/blob'; 
 import path from 'path';
 
 const prisma = new PrismaClient();
@@ -35,7 +35,16 @@ export const createParking = async (req: Request, res: Response) => {
       return res.status(400).json({ error: "Un parking est déjà associé à cet utilisateur." });
     }
 
-    const logo = req.file ? `/uploads/${req.file.filename}` : undefined;
+    let logo: string | undefined;
+    if (req.file) {
+      // Upload vers Vercel Blob
+      const newFilename = `${Date.now()}-${Math.round(Math.random() * 1e9)}${req.file.originalname ? path.extname(req.file.originalname) : '.png'}`; // Utilisez path si importé, sinon adaptez
+      const result = await put(newFilename, req.file.buffer, {
+        access: 'public', 
+        token: process.env.BLOB_READ_WRITE_TOKEN,
+      });
+      logo = result.url; 
+    }
 
     const newParking = await prisma.parking.create({
       data: {
@@ -60,8 +69,7 @@ export const createParking = async (req: Request, res: Response) => {
   }
 };
 
-
-// GET ALL PARKINGS
+// GET ALL PARKINGS (inchangé)
 export const getAllParkings = async (_req: Request, res: Response) => {
   try {
     const parkings = await prisma.parking.findMany({
@@ -73,7 +81,7 @@ export const getAllParkings = async (_req: Request, res: Response) => {
   }
 };
 
-// GET PARKING BY ID
+// GET PARKING BY ID (inchangé)
 export const getParkingById = async (req: Request, res: Response) => {
   const { id } = req.params;
   try {
@@ -115,14 +123,20 @@ export const updateParking = async (req: Request, res: Response) => {
     let newLogo = parking.logo;
 
     if (req.file) {
-      // Supprimer ancien logo si existant
+      // Supprimer l'ancien logo si existant (optionnel, pour nettoyer le storage)
       if (parking.logo) {
-        const oldPath = path.join(__dirname, "../../", parking.logo);
-        if (fs.existsSync(oldPath)) {
-          fs.unlinkSync(oldPath);
-        }
+        // Extraire le pathname de l'URL blob (ex. : /uploads/filename.png)
+        const url = new URL(parking.logo);
+        await del(url.pathname.slice(1)); // del() supprime le blob par son chemin
       }
-      newLogo = `/uploads/${req.file.filename}`;
+
+      // Upload nouveau logo vers Vercel Blob
+      const newFilename = `${Date.now()}-${Math.round(Math.random() * 1e9)}${req.file.originalname ? path.extname(req.file.originalname) : '.png'}`;
+      const result = await put(newFilename, req.file.buffer, {
+        access: 'public',
+        token: process.env.BLOB_READ_WRITE_TOKEN,
+      });
+      newLogo = result.url;
     }
 
     const updatedParking = await prisma.parking.update({
@@ -148,10 +162,16 @@ export const updateParking = async (req: Request, res: Response) => {
   }
 };
 
-// DELETE PARKING
+// DELETE PARKING (optionnel : ajoutez suppression du logo si besoin)
 export const deleteParking = async (req: Request, res: Response) => {
   const { id } = req.params;
   try {
+    const parking = await prisma.parking.findUnique({ where: { id: parseInt(id) } });
+    if (parking && parking.logo) {
+      // Supprimer le logo du blob
+      const url = new URL(parking.logo);
+      await del(url.pathname.slice(1));
+    }
     await prisma.parking.delete({ where: { id: parseInt(id) } });
     return res.json({ message: 'Parking supprimé avec succès' });
   } catch (err) {
