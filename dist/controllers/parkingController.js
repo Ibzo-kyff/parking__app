@@ -32,15 +32,19 @@ const createParking = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         if (existingParking) {
             return res.status(400).json({ error: "Un parking est déjà associé à cet utilisateur." });
         }
-        let logo;
+        let logoUrl = undefined;
         if (req.file) {
-            // Upload vers Vercel Blob
-            const newFilename = `${Date.now()}-${Math.round(Math.random() * 1e9)}${req.file.originalname ? path_1.default.extname(req.file.originalname) : '.png'}`; // Utilisez path si importé, sinon adaptez
-            const result = yield (0, blob_1.put)(newFilename, req.file.buffer, {
-                access: 'public',
-                token: process.env.BLOB_READ_WRITE_TOKEN,
-            });
-            logo = result.url;
+            try {
+                // Upload vers Vercel Blob
+                const blob = yield (0, blob_1.put)(`parking-${Date.now()}-${Math.round(Math.random() * 1e9)}.png`, req.file.buffer, {
+                    access: 'public',
+                });
+                logoUrl = blob.url;
+            }
+            catch (uploadError) {
+                console.error('Erreur upload Vercel Blob:', uploadError);
+                return res.status(500).json({ error: 'Erreur lors du téléchargement de l\'image' });
+            }
         }
         const newParking = yield prisma.parking.create({
             data: {
@@ -54,14 +58,14 @@ const createParking = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                 capacity: capacity ? Number(capacity) : 0,
                 hoursOfOperation,
                 status: status || client_1.ParkingStatus.ACTIVE,
-                logo
+                logo: logoUrl
             }
         });
         return res.status(201).json({ message: 'Parking créé avec succès', parking: newParking });
     }
     catch (err) {
         console.error(err);
-        return res.status(500).json({ error: 'Erreur lors de la création du parking', details: err.message || err });
+        return res.status(500).json({ error: 'Erreur lors de la création du parking', details: err.message });
     }
 });
 exports.createParking = createParking;
@@ -108,11 +112,16 @@ const updateParking = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         }
         let newLogo = parking.logo;
         if (req.file) {
-            // Supprimer l'ancien logo si existant (optionnel, pour nettoyer le storage)
+            // Supprimer l'ancien logo si existant et si c'est une URL valide
             if (parking.logo) {
-                // Extraire le pathname de l'URL blob (ex. : /uploads/filename.png)
-                const url = new URL(parking.logo);
-                yield (0, blob_1.del)(url.pathname.slice(1)); // del() supprime le blob par son chemin
+                try {
+                    const url = new URL(parking.logo);
+                    yield (0, blob_1.del)(url.pathname.slice(1)); // Supprime le blob si c'est une URL valide
+                }
+                catch (error) {
+                    // Si parking.logo n'est pas une URL valide, on ignore l'erreur (ancien chemin local par ex.)
+                    console.warn(`Ancien logo non supprimé, URL invalide : ${parking.logo}`);
+                }
             }
             // Upload nouveau logo vers Vercel Blob
             const newFilename = `${Date.now()}-${Math.round(Math.random() * 1e9)}${req.file.originalname ? path_1.default.extname(req.file.originalname) : '.png'}`;

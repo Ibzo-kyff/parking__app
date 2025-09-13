@@ -6,8 +6,7 @@ import jwt from 'jsonwebtoken';
 import { generateAccessToken, generateRefreshToken } from '../utils/jwtUtils';
 import nodemailer from 'nodemailer';
 import { JwtPayload } from 'jsonwebtoken';
-import fs from 'fs';
-import path from 'path';
+import { put, del } from '@vercel/blob';
 
 interface AuthRequest extends Request {
   user?: JwtPayload;
@@ -59,7 +58,7 @@ const registerSchema = z.object({
   phone: z.string().min(8).max(15),
   nom: z.string().min(1, 'Le nom est requis'),
   prenom: z.string().min(1, 'Le prénom est requis'),
-  image: z.string().url().optional(),
+  image: z.string().optional(),
   address: z.string().optional(),
   role: z.nativeEnum(Role),
 });
@@ -85,7 +84,7 @@ const updateUserSchema = z.object({
   phone: z.string().min(8).max(15).optional(),
   nom: z.string().min(1).optional(),
   prenom: z.string().min(1).optional(),
-  image: z.string().url().optional(),
+  image: z.string().optional(),
   address: z.string().optional(),
   role: z.nativeEnum(Role).optional(),
   status: z.nativeEnum(Status).optional(),
@@ -104,35 +103,43 @@ const selfUpdateSchema = z.object({
 
 export const register = async (req: Request, res: Response) => {
   try {
-    const image = (req as any).file ? `/uploads/${(req as any).file.filename}` : undefined;
-
-    const body = { ...req.body, ...(image ? { image } : {}) };
-    const data = registerSchema.parse(body);
+    const body = registerSchema.parse(req.body);
+    const file = (req as any).file as Express.Multer.File | undefined;
 
     const existing = await prisma.user.findFirst({
-      where: { OR: [{ email: data.email }, { phone: data.phone }] },
+      where: { OR: [{ email: body.email }, { phone: body.phone }] },
     });
 
     if (existing) {
-      if ((req as any).file) {
-        try { await fs.promises.unlink(path.join(__dirname, '../../uploads', (req as any).file.filename)); } catch (e) { /* ignore */ }
+      if (file) {
+        console.warn('Fichier uploadé mais utilisateur existe déjà, aucun fichier supprimé car memoryStorage est utilisé.');
       }
       return res.status(409).json({ message: 'Email ou téléphone déjà utilisé.' });
     }
 
-    const hashedPassword = await bcrypt.hash(data.password, 10);
+    let imageUrl: string | undefined;
+    if (file) {
+      const newFilename = `users/${Date.now()}-${Math.round(Math.random() * 1e9)}${file.originalname ? file.originalname.match(/\.[0-9a-z]+$/i)?.[0] : '.jpg'}`;
+      const result = await put(newFilename, file.buffer, {
+        access: 'public',
+        token: process.env.BLOB_READ_WRITE_TOKEN,
+      });
+      imageUrl = result.url;
+    }
+
+    const hashedPassword = await bcrypt.hash(body.password, 10);
 
     const user = await prisma.user.create({
       data: {
-        email: data.email,
+        email: body.email,
         password: hashedPassword,
-        phone: data.phone,
-        nom: data.nom,
-        prenom: data.prenom,
-        image: data.image,
-        address: data.address,
-        role: data.role,
-        status: data.role === 'CLIENT' ? Status.APPROVED : Status.PENDING,
+        phone: body.phone,
+        nom: body.nom,
+        prenom: body.prenom,
+        image: imageUrl,
+        address: body.address,
+        role: body.role,
+        status: body.role === 'CLIENT' ? Status.APPROVED : Status.PENDING,
       },
     });
 
@@ -145,7 +152,7 @@ export const register = async (req: Request, res: Response) => {
         data: { emailVerifyOTP: otp, emailVerifyOTPExpires: expires },
       });
 
-      await sendOTPEmail(data.email, otp, 'verify');
+      await sendOTPEmail(body.email, otp, 'verify');
     }
 
     const accessToken = generateAccessToken({ id: user.id, email: user.email, role: user.role });
@@ -173,11 +180,11 @@ export const register = async (req: Request, res: Response) => {
       emailVerified: user.emailVerified
     });
   } catch (err: unknown) {
-    console.error(err);
+    console.error('Erreur lors de l\'inscription:', err);
     if (err instanceof z.ZodError) {
       return res.status(400).json({ message: 'Données invalides', errors: err.issues });
     }
-    return res.status(500).json({ message: 'Erreur serveur' });
+    return res.status(500).json({ message: 'Erreur serveur', details: err instanceof Error ? err.message : 'Erreur inconnue' });
   }
 };
 
@@ -212,12 +219,13 @@ export const login = async (req: Request, res: Response) => {
       maxAge: 7 * 24 * 60 * 60 * 1000,
     });
     
-    const parking = user.role === "PARKING"
-  ? await prisma.parking.findUnique({
-      where: { userId: user.id },
-      select: { id: true }
-    })
-  : null;
+    const parking = user.role === 'PARKING'
+      ? await prisma.parking.findUnique({
+          where: { userId: user.id },
+          select: { id: true }
+        })
+      : null;
+
     return res.status(200).json({
       message: 'Connexion réussie',
       accessToken,
@@ -229,16 +237,16 @@ export const login = async (req: Request, res: Response) => {
       parkingId: parking?.id ?? null
     });
   } catch (err: unknown) {
-    console.error(err);
+    console.error('Erreur lors de la connexion:', err);
     if (err instanceof z.ZodError) {
       return res.status(400).json({ message: 'Données invalides', errors: err.issues });
     }
-    return res.status(500).json({ message: 'Erreur serveur' });
+    return res.status(500).json({ message: 'Erreur serveur', details: err instanceof Error ? err.message : 'Erreur inconnue' });
   }
 };
 
 export const refreshTokenHandler = async (req: Request, res: Response) => {
-  const refreshToken = req.cookies.refreshToken; // Récupérer du cookie
+  const refreshToken = req.cookies.refreshToken;
   if (!refreshToken) {
     return res.status(401).json({ message: 'Refresh token manquant' });
   }
@@ -261,7 +269,6 @@ export const refreshTokenHandler = async (req: Request, res: Response) => {
       data: { refreshToken: newRefreshToken },
     });
 
-    // Mettre à jour le cookie avec le nouveau refreshToken
     res.cookie('refreshToken', newRefreshToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
@@ -271,6 +278,7 @@ export const refreshTokenHandler = async (req: Request, res: Response) => {
 
     return res.json({ accessToken: newAccessToken });
   } catch (err: unknown) {
+    console.error('Erreur lors du rafraîchissement du token:', err);
     return res.status(403).json({ message: 'Refresh token invalide' });
   }
 };
@@ -290,8 +298,8 @@ export const logout = async (req: Request, res: Response) => {
     res.clearCookie('refreshToken');
     return res.status(200).json({ message: 'Déconnexion réussie' });
   } catch (err: unknown) {
-    console.error(err);
-    return res.status(500).json({ message: 'Erreur serveur' });
+    console.error('Erreur lors de la déconnexion:', err);
+    return res.status(500).json({ message: 'Erreur serveur', details: err instanceof Error ? err.message : 'Erreur inconnue' });
   }
 };
 
@@ -319,8 +327,8 @@ export const sendVerificationEmail = async (req: AuthRequest, res: Response) => 
       otp: process.env.NODE_ENV === 'development' ? otp : undefined
     });
   } catch (err: unknown) {
-    console.error(err);
-    return res.status(500).json({ message: 'Erreur lors de l\'envoi du code OTP' });
+    console.error('Erreur lors de l\'envoi de l\'OTP:', err);
+    return res.status(500).json({ message: 'Erreur lors de l\'envoi du code OTP', details: err instanceof Error ? err.message : 'Erreur inconnue' });
   }
 };
 
@@ -353,11 +361,11 @@ export const verifyEmailWithOTP = async (req: Request, res: Response) => {
 
     res.json({ message: 'Email vérifié avec succès' });
   } catch (err: unknown) {
-    console.error(err);
+    console.error('Erreur lors de la vérification de l\'email:', err);
     if (err instanceof z.ZodError) {
       return res.status(400).json({ message: 'Données invalides', errors: err.issues });
     }
-    return res.status(500).json({ message: 'Erreur serveur' });
+    return res.status(500).json({ message: 'Erreur serveur', details: err instanceof Error ? err.message : 'Erreur inconnue' });
   }
 };
 
@@ -390,8 +398,8 @@ export const forgotPassword = async (req: Request, res: Response) => {
       otp: process.env.NODE_ENV === 'development' ? otp : undefined
     });
   } catch (err: unknown) {
-    console.error(err);
-    return res.status(500).json({ message: 'Erreur lors de l\'envoi du code OTP' });
+    console.error('Erreur lors de la demande de réinitialisation:', err);
+    return res.status(500).json({ message: 'Erreur lors de l\'envoi du code OTP', details: err instanceof Error ? err.message : 'Erreur inconnue' });
   }
 };
 
@@ -427,17 +435,17 @@ export const resetPassword = async (req: Request, res: Response) => {
 
     res.json({ message: 'Mot de passe réinitialisé avec succès' });
   } catch (err: unknown) {
-    console.error(err);
+    console.error('Erreur lors de la réinitialisation du mot de passe:', err);
     if (err instanceof z.ZodError) {
       return res.status(400).json({ message: 'Données invalides', errors: err.issues });
     }
-    return res.status(500).json({ message: 'Erreur serveur' });
+    return res.status(500).json({ message: 'Erreur serveur', details: err instanceof Error ? err.message : 'Erreur inconnue' });
   }
 };
 
 export const verifyResetOTP = async (req: Request, res: Response) => {
   try {
-    const { email, otp } = req.body;
+    const { email, otp } = verifyOTPSchema.parse(req.body);
 
     const user = await prisma.user.findFirst({
       where: {
@@ -456,8 +464,8 @@ export const verifyResetOTP = async (req: Request, res: Response) => {
       verified: true 
     });
   } catch (err: unknown) {
-    console.error(err);
-    return res.status(500).json({ message: 'Erreur serveur' });
+    console.error('Erreur lors de la vérification de l\'OTP:', err);
+    return res.status(500).json({ message: 'Erreur serveur', details: err instanceof Error ? err.message : 'Erreur inconnue' });
   }
 };
 
@@ -486,8 +494,8 @@ export const getAllUsers = async (req: AuthRequest, res: Response) => {
 
     return res.status(200).json(users);
   } catch (err: unknown) {
-    console.error(err);
-    return res.status(500).json({ message: 'Erreur serveur' });
+    console.error('Erreur lors de la récupération des utilisateurs:', err);
+    return res.status(500).json({ message: 'Erreur serveur', details: err instanceof Error ? err.message : 'Erreur inconnue' });
   }
 };
 
@@ -526,8 +534,8 @@ export const getUserById = async (req: AuthRequest, res: Response) => {
 
     return res.status(200).json(user);
   } catch (err: unknown) {
-    console.error(err);
-    return res.status(500).json({ message: 'Erreur serveur' });
+    console.error('Erreur lors de la récupération de l\'utilisateur:', err);
+    return res.status(500).json({ message: 'Erreur serveur', details: err instanceof Error ? err.message : 'Erreur inconnue' });
   }
 };
 
@@ -559,7 +567,6 @@ export const getCurrentUser = async (req: AuthRequest, res: Response) => {
       return res.status(404).json({ message: 'Utilisateur non trouvé' });
     }
 
-    // Extraire l'accessToken de l'en-tête Authorization
     const authHeader = req.headers.authorization;
     const accessToken = authHeader && authHeader.startsWith('Bearer ') 
       ? authHeader.split(' ')[1] 
@@ -567,11 +574,11 @@ export const getCurrentUser = async (req: AuthRequest, res: Response) => {
 
     return res.status(200).json({
       ...user,
-      accessToken, // Inclure l'accessToken dans la réponse
+      accessToken,
     });
   } catch (err: unknown) {
-    console.error(err);
-    return res.status(500).json({ message: 'Erreur serveur' });
+    console.error('Erreur lors de la récupération de l\'utilisateur courant:', err);
+    return res.status(500).json({ message: 'Erreur serveur', details: err instanceof Error ? err.message : 'Erreur inconnue' });
   }
 };
 
@@ -586,39 +593,78 @@ export const updateUser = async (req: AuthRequest, res: Response) => {
       return res.status(403).json({ message: 'Accès refusé. Seuls les administrateurs ou le propriétaire peuvent modifier cet utilisateur.' });
     }
 
-    const data = updateUserSchema.parse(req.body);
+    const file = (req as any).file as Express.Multer.File | undefined;
+    const body = updateUserSchema.parse(req.body);
 
-    if (req.user.role !== 'ADMIN' && (data.role || data.status)) {
+    if (req.user.role !== 'ADMIN' && (body.role || body.status)) {
       return res.status(403).json({ message: 'Seuls les administrateurs peuvent modifier le rôle ou le statut.' });
     }
 
-    const hashedPassword = data.password ? await bcrypt.hash(data.password, 10) : undefined;
+    const existingUser = await prisma.user.findUnique({ where: { id: userId }, select: { image: true } });
+    if (!existingUser) {
+      return res.status(404).json({ message: 'Utilisateur non trouvé' });
+    }
+
+    let imageUrl = existingUser.image;
+    if (file) {
+      if (imageUrl) {
+        try {
+          const url = new URL(imageUrl);
+          await del(url.pathname.slice(1));
+        } catch (error) {
+          console.warn(`Ancien blob non supprimé, URL invalide : ${imageUrl}`);
+        }
+      }
+
+      const newFilename = `users/${Date.now()}-${Math.round(Math.random() * 1e9)}${file.originalname ? file.originalname.match(/\.[0-9a-z]+$/i)?.[0] : '.jpg'}`;
+      const result = await put(newFilename, file.buffer, {
+        access: 'public',
+        token: process.env.BLOB_READ_WRITE_TOKEN,
+      });
+      imageUrl = result.url;
+    }
+
+    const hashedPassword = body.password ? await bcrypt.hash(body.password, 10) : undefined;
 
     const updatedUser = await prisma.user.update({
       where: { id: userId },
       data: {
-        email: data.email,
-        phone: data.phone,
-        nom: data.nom,
-        prenom: data.prenom,
-        image: data.image,
-        address: data.address,
-        role: data.role,
-        status: data.status,
-        emailVerified: data.emailVerified,
+        email: body.email,
+        phone: body.phone,
+        nom: body.nom,
+        prenom: body.prenom,
+        image: imageUrl,
+        address: body.address,
+        role: body.role,
+        status: body.status,
+        emailVerified: body.emailVerified,
         password: hashedPassword,
+      },
+      select: {
+        id: true,
+        email: true,
+        phone: true,
+        nom: true,
+        prenom: true,
+        image: true,
+        address: true,
+        role: true,
+        status: true,
+        emailVerified: true,
+        createdAt: true,
+        updatedAt: true,
       },
     });
 
     return res.status(200).json({ message: 'Utilisateur mis à jour avec succès', user: updatedUser });
   } catch (err: unknown) {
-    console.error(err);
+    console.error('Erreur lors de la mise à jour de l\'utilisateur:', err);
     if (err instanceof z.ZodError) {
       return res.status(400).json({ message: 'Données invalides', errors: err.issues });
     } else if (err instanceof Error && 'code' in err && err.code === 'P2025') {
       return res.status(404).json({ message: 'Utilisateur non trouvé' });
     }
-    return res.status(500).json({ message: 'Erreur serveur' });
+    return res.status(500).json({ message: 'Erreur serveur', details: err instanceof Error ? err.message : 'Erreur inconnue' });
   }
 };
 
@@ -628,24 +674,43 @@ export const updateCurrentUser = async (req: AuthRequest, res: Response) => {
       return res.status(401).json({ message: 'Non authentifié' });
     }
 
-    // If a file was uploaded, use it
-    const image = (req as any).file ? `/uploads/${(req as any).file.filename}` : undefined;
+    const file = (req as any).file as Express.Multer.File | undefined;
+    const body = selfUpdateSchema.parse(req.body);
 
-    // merge image into body for zod parsing
-    const body = { ...req.body, ...(image ? { image } : {}) };
+    const existingUser = await prisma.user.findUnique({ where: { id: req.user.id }, select: { image: true } });
+    if (!existingUser) {
+      return res.status(404).json({ message: 'Utilisateur non trouvé' });
+    }
 
-    const data = selfUpdateSchema.parse(body);
+    let imageUrl = existingUser.image;
+    if (file) {
+      if (imageUrl) {
+        try {
+          const url = new URL(imageUrl);
+          await del(url.pathname.slice(1));
+        } catch (error) {
+          console.warn(`Ancien blob non supprimé, URL invalide : ${imageUrl}`);
+        }
+      }
 
-    const hashedPassword = data.password ? await bcrypt.hash(data.password, 10) : undefined;
+      const newFilename = `users/${Date.now()}-${Math.round(Math.random() * 1e9)}${file.originalname ? file.originalname.match(/\.[0-9a-z]+$/i)?.[0] : '.jpg'}`;
+      const result = await put(newFilename, file.buffer, {
+        access: 'public',
+        token: process.env.BLOB_READ_WRITE_TOKEN,
+      });
+      imageUrl = result.url;
+    }
+
+    const hashedPassword = body.password ? await bcrypt.hash(body.password, 10) : undefined;
 
     const updatedUser = await prisma.user.update({
       where: { id: req.user.id },
       data: {
-        phone: data.phone,
-        nom: data.nom,
-        prenom: data.prenom,
-        image: data.image,
-        address: data.address,
+        phone: body.phone,
+        nom: body.nom,
+        prenom: body.prenom,
+        image: imageUrl,
+        address: body.address,
         password: hashedPassword,
       },
       select: {
@@ -666,13 +731,13 @@ export const updateCurrentUser = async (req: AuthRequest, res: Response) => {
 
     return res.status(200).json({ message: 'Profil mis à jour avec succès', user: updatedUser });
   } catch (err: unknown) {
-    console.error(err);
+    console.error('Erreur lors de la mise à jour du profil:', err);
     if (err instanceof z.ZodError) {
       return res.status(400).json({ message: 'Données invalides', errors: err.issues });
     } else if (err instanceof Error && 'code' in err && err.code === 'P2025') {
       return res.status(404).json({ message: 'Utilisateur non trouvé' });
     }
-    return res.status(500).json({ message: 'Erreur serveur' });
+    return res.status(500).json({ message: 'Erreur serveur', details: err instanceof Error ? err.message : 'Erreur inconnue' });
   }
 };
 
@@ -687,16 +752,30 @@ export const deleteUser = async (req: AuthRequest, res: Response) => {
       return res.status(403).json({ message: 'Accès refusé. Seuls les administrateurs ou le propriétaire peuvent supprimer cet utilisateur.' });
     }
 
+    const user = await prisma.user.findUnique({ where: { id: userId }, select: { image: true } });
+    if (!user) {
+      return res.status(404).json({ message: 'Utilisateur non trouvé' });
+    }
+
+    if (user.image) {
+      try {
+        const url = new URL(user.image);
+        await del(url.pathname.slice(1));
+      } catch (error) {
+        console.warn(`Ancien blob non supprimé, URL invalide : ${user.image}`);
+      }
+    }
+
     await prisma.user.delete({
       where: { id: userId },
     });
 
     return res.status(200).json({ message: 'Utilisateur supprimé avec succès' });
   } catch (err: unknown) {
-    console.error(err);
+    console.error('Erreur lors de la suppression de l\'utilisateur:', err);
     if (err instanceof Error && 'code' in err && err.code === 'P2025') {
       return res.status(404).json({ message: 'Utilisateur non trouvé' });
     }
-    return res.status(500).json({ message: 'Erreur serveur' });
+    return res.status(500).json({ message: 'Erreur serveur', details: err instanceof Error ? err.message : 'Erreur inconnue' });
   }
 };

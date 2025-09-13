@@ -13,7 +13,6 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
-const path_1 = __importDefault(require("path"));
 const authRoutes_1 = __importDefault(require("./routes/authRoutes"));
 const client_1 = require("@prisma/client");
 const cookie_parser_1 = __importDefault(require("cookie-parser"));
@@ -25,8 +24,7 @@ const app = (0, express_1.default)();
 const prisma = new client_1.PrismaClient();
 app.use(express_1.default.json());
 app.use((0, cookie_parser_1.default)());
-// Ajout pour servir les dossiers statiques
-app.use('/uploads', express_1.default.static(path_1.default.join(__dirname, '../uploads')));
+// Routes
 app.use('/api/auth', authRoutes_1.default);
 app.use('/api/vehicules', vehiculeRoutes_1.default);
 app.use('/api/parkings', parkingRoutes_1.default);
@@ -37,7 +35,7 @@ app.use((err, _req, res, _next) => {
     if (err && typeof err === 'object' && 'name' in err && err.name === 'MulterError') {
         return res.status(400).json({
             error: err.message || 'Erreur upload',
-            hint: "Utilisez Body=form-data avec un champ 'image'/'logo' ou 'file' de type Fichier. Ne laissez pas le nom de champ vide."
+            hint: "Utilisez Body=form-data avec un champ 'image' ou 'photos' de type Fichier. Ne laissez pas le nom de champ vide."
         });
     }
     if (err instanceof Error) {

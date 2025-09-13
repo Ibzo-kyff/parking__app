@@ -19,8 +19,7 @@ const zod_1 = require("zod");
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const jwtUtils_1 = require("../utils/jwtUtils");
 const nodemailer_1 = __importDefault(require("nodemailer"));
-const fs_1 = __importDefault(require("fs"));
-const path_1 = __importDefault(require("path"));
+const blob_1 = require("@vercel/blob");
 const prisma = new client_1.PrismaClient();
 const transporter = nodemailer_1.default.createTransport({
     service: 'gmail',
@@ -62,7 +61,7 @@ const registerSchema = zod_1.z.object({
     phone: zod_1.z.string().min(8).max(15),
     nom: zod_1.z.string().min(1, 'Le nom est requis'),
     prenom: zod_1.z.string().min(1, 'Le prénom est requis'),
-    image: zod_1.z.string().url().optional(),
+    image: zod_1.z.string().optional(),
     address: zod_1.z.string().optional(),
     role: zod_1.z.nativeEnum(client_1.Role),
 });
@@ -84,7 +83,7 @@ const updateUserSchema = zod_1.z.object({
     phone: zod_1.z.string().min(8).max(15).optional(),
     nom: zod_1.z.string().min(1).optional(),
     prenom: zod_1.z.string().min(1).optional(),
-    image: zod_1.z.string().url().optional(),
+    image: zod_1.z.string().optional(),
     address: zod_1.z.string().optional(),
     role: zod_1.z.nativeEnum(client_1.Role).optional(),
     status: zod_1.z.nativeEnum(client_1.Status).optional(),
@@ -100,34 +99,40 @@ const selfUpdateSchema = zod_1.z.object({
     password: zod_1.z.string().min(6).optional(),
 });
 const register = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
     try {
-        const image = req.file ? `/uploads/${req.file.filename}` : undefined;
-        const body = Object.assign(Object.assign({}, req.body), (image ? { image } : {}));
-        const data = registerSchema.parse(body);
+        const body = registerSchema.parse(req.body);
+        const file = req.file;
         const existing = yield prisma.user.findFirst({
-            where: { OR: [{ email: data.email }, { phone: data.phone }] },
+            where: { OR: [{ email: body.email }, { phone: body.phone }] },
         });
         if (existing) {
-            if (req.file) {
-                try {
-                    yield fs_1.default.promises.unlink(path_1.default.join(__dirname, '../../uploads', req.file.filename));
-                }
-                catch (e) { /* ignore */ }
+            if (file) {
+                console.warn('Fichier uploadé mais utilisateur existe déjà, aucun fichier supprimé car memoryStorage est utilisé.');
             }
             return res.status(409).json({ message: 'Email ou téléphone déjà utilisé.' });
         }
-        const hashedPassword = yield bcrypt_1.default.hash(data.password, 10);
+        let imageUrl;
+        if (file) {
+            const newFilename = `users/${Date.now()}-${Math.round(Math.random() * 1e9)}${file.originalname ? (_a = file.originalname.match(/\.[0-9a-z]+$/i)) === null || _a === void 0 ? void 0 : _a[0] : '.jpg'}`;
+            const result = yield (0, blob_1.put)(newFilename, file.buffer, {
+                access: 'public',
+                token: process.env.BLOB_READ_WRITE_TOKEN,
+            });
+            imageUrl = result.url;
+        }
+        const hashedPassword = yield bcrypt_1.default.hash(body.password, 10);
         const user = yield prisma.user.create({
             data: {
-                email: data.email,
+                email: body.email,
                 password: hashedPassword,
-                phone: data.phone,
-                nom: data.nom,
-                prenom: data.prenom,
-                image: data.image,
-                address: data.address,
-                role: data.role,
-                status: data.role === 'CLIENT' ? client_1.Status.APPROVED : client_1.Status.PENDING,
+                phone: body.phone,
+                nom: body.nom,
+                prenom: body.prenom,
+                image: imageUrl,
+                address: body.address,
+                role: body.role,
+                status: body.role === 'CLIENT' ? client_1.Status.APPROVED : client_1.Status.PENDING,
             },
         });
         if (!user.emailVerified) {
@@ -137,7 +142,7 @@ const register = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
                 where: { id: user.id },
                 data: { emailVerifyOTP: otp, emailVerifyOTPExpires: expires },
             });
-            yield sendOTPEmail(data.email, otp, 'verify');
+            yield sendOTPEmail(body.email, otp, 'verify');
         }
         const accessToken = (0, jwtUtils_1.generateAccessToken)({ id: user.id, email: user.email, role: user.role });
         const refreshToken = (0, jwtUtils_1.generateRefreshToken)({ id: user.id, email: user.email, role: user.role });
@@ -162,11 +167,11 @@ const register = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
         });
     }
     catch (err) {
-        console.error(err);
+        console.error('Erreur lors de l\'inscription:', err);
         if (err instanceof zod_1.z.ZodError) {
             return res.status(400).json({ message: 'Données invalides', errors: err.issues });
         }
-        return res.status(500).json({ message: 'Erreur serveur' });
+        return res.status(500).json({ message: 'Erreur serveur', details: err instanceof Error ? err.message : 'Erreur inconnue' });
     }
 });
 exports.register = register;
@@ -195,7 +200,7 @@ const login = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
             sameSite: 'strict',
             maxAge: 7 * 24 * 60 * 60 * 1000,
         });
-        const parking = user.role === "PARKING"
+        const parking = user.role === 'PARKING'
             ? yield prisma.parking.findUnique({
                 where: { userId: user.id },
                 select: { id: true }
@@ -213,16 +218,16 @@ const login = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
         });
     }
     catch (err) {
-        console.error(err);
+        console.error('Erreur lors de la connexion:', err);
         if (err instanceof zod_1.z.ZodError) {
             return res.status(400).json({ message: 'Données invalides', errors: err.issues });
         }
-        return res.status(500).json({ message: 'Erreur serveur' });
+        return res.status(500).json({ message: 'Erreur serveur', details: err instanceof Error ? err.message : 'Erreur inconnue' });
     }
 });
 exports.login = login;
 const refreshTokenHandler = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    const refreshToken = req.cookies.refreshToken; // Récupérer du cookie
+    const refreshToken = req.cookies.refreshToken;
     if (!refreshToken) {
         return res.status(401).json({ message: 'Refresh token manquant' });
     }
@@ -240,7 +245,6 @@ const refreshTokenHandler = (req, res) => __awaiter(void 0, void 0, void 0, func
             where: { id: user.id },
             data: { refreshToken: newRefreshToken },
         });
-        // Mettre à jour le cookie avec le nouveau refreshToken
         res.cookie('refreshToken', newRefreshToken, {
             httpOnly: true,
             secure: process.env.NODE_ENV === 'production',
@@ -250,6 +254,7 @@ const refreshTokenHandler = (req, res) => __awaiter(void 0, void 0, void 0, func
         return res.json({ accessToken: newAccessToken });
     }
     catch (err) {
+        console.error('Erreur lors du rafraîchissement du token:', err);
         return res.status(403).json({ message: 'Refresh token invalide' });
     }
 });
@@ -270,8 +275,8 @@ const logout = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
         return res.status(200).json({ message: 'Déconnexion réussie' });
     }
     catch (err) {
-        console.error(err);
-        return res.status(500).json({ message: 'Erreur serveur' });
+        console.error('Erreur lors de la déconnexion:', err);
+        return res.status(500).json({ message: 'Erreur serveur', details: err instanceof Error ? err.message : 'Erreur inconnue' });
     }
 });
 exports.logout = logout;
@@ -297,8 +302,8 @@ const sendVerificationEmail = (req, res) => __awaiter(void 0, void 0, void 0, fu
         });
     }
     catch (err) {
-        console.error(err);
-        return res.status(500).json({ message: 'Erreur lors de l\'envoi du code OTP' });
+        console.error('Erreur lors de l\'envoi de l\'OTP:', err);
+        return res.status(500).json({ message: 'Erreur lors de l\'envoi du code OTP', details: err instanceof Error ? err.message : 'Erreur inconnue' });
     }
 });
 exports.sendVerificationEmail = sendVerificationEmail;
@@ -328,11 +333,11 @@ const verifyEmailWithOTP = (req, res) => __awaiter(void 0, void 0, void 0, funct
         res.json({ message: 'Email vérifié avec succès' });
     }
     catch (err) {
-        console.error(err);
+        console.error('Erreur lors de la vérification de l\'email:', err);
         if (err instanceof zod_1.z.ZodError) {
             return res.status(400).json({ message: 'Données invalides', errors: err.issues });
         }
-        return res.status(500).json({ message: 'Erreur serveur' });
+        return res.status(500).json({ message: 'Erreur serveur', details: err instanceof Error ? err.message : 'Erreur inconnue' });
     }
 });
 exports.verifyEmailWithOTP = verifyEmailWithOTP;
@@ -361,8 +366,8 @@ const forgotPassword = (req, res) => __awaiter(void 0, void 0, void 0, function*
         });
     }
     catch (err) {
-        console.error(err);
-        return res.status(500).json({ message: 'Erreur lors de l\'envoi du code OTP' });
+        console.error('Erreur lors de la demande de réinitialisation:', err);
+        return res.status(500).json({ message: 'Erreur lors de l\'envoi du code OTP', details: err instanceof Error ? err.message : 'Erreur inconnue' });
     }
 });
 exports.forgotPassword = forgotPassword;
@@ -394,17 +399,17 @@ const resetPassword = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         res.json({ message: 'Mot de passe réinitialisé avec succès' });
     }
     catch (err) {
-        console.error(err);
+        console.error('Erreur lors de la réinitialisation du mot de passe:', err);
         if (err instanceof zod_1.z.ZodError) {
             return res.status(400).json({ message: 'Données invalides', errors: err.issues });
         }
-        return res.status(500).json({ message: 'Erreur serveur' });
+        return res.status(500).json({ message: 'Erreur serveur', details: err instanceof Error ? err.message : 'Erreur inconnue' });
     }
 });
 exports.resetPassword = resetPassword;
 const verifyResetOTP = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        const { email, otp } = req.body;
+        const { email, otp } = verifyOTPSchema.parse(req.body);
         const user = yield prisma.user.findFirst({
             where: {
                 email,
@@ -421,8 +426,8 @@ const verifyResetOTP = (req, res) => __awaiter(void 0, void 0, void 0, function*
         });
     }
     catch (err) {
-        console.error(err);
-        return res.status(500).json({ message: 'Erreur serveur' });
+        console.error('Erreur lors de la vérification de l\'OTP:', err);
+        return res.status(500).json({ message: 'Erreur serveur', details: err instanceof Error ? err.message : 'Erreur inconnue' });
     }
 });
 exports.verifyResetOTP = verifyResetOTP;
@@ -450,8 +455,8 @@ const getAllUsers = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
         return res.status(200).json(users);
     }
     catch (err) {
-        console.error(err);
-        return res.status(500).json({ message: 'Erreur serveur' });
+        console.error('Erreur lors de la récupération des utilisateurs:', err);
+        return res.status(500).json({ message: 'Erreur serveur', details: err instanceof Error ? err.message : 'Erreur inconnue' });
     }
 });
 exports.getAllUsers = getAllUsers;
@@ -487,8 +492,8 @@ const getUserById = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
         return res.status(200).json(user);
     }
     catch (err) {
-        console.error(err);
-        return res.status(500).json({ message: 'Erreur serveur' });
+        console.error('Erreur lors de la récupération de l\'utilisateur:', err);
+        return res.status(500).json({ message: 'Erreur serveur', details: err instanceof Error ? err.message : 'Erreur inconnue' });
     }
 });
 exports.getUserById = getUserById;
@@ -517,7 +522,6 @@ const getCurrentUser = (req, res) => __awaiter(void 0, void 0, void 0, function*
         if (!user) {
             return res.status(404).json({ message: 'Utilisateur non trouvé' });
         }
-        // Extraire l'accessToken de l'en-tête Authorization
         const authHeader = req.headers.authorization;
         const accessToken = authHeader && authHeader.startsWith('Bearer ')
             ? authHeader.split(' ')[1]
@@ -525,12 +529,13 @@ const getCurrentUser = (req, res) => __awaiter(void 0, void 0, void 0, function*
         return res.status(200).json(Object.assign(Object.assign({}, user), { accessToken }));
     }
     catch (err) {
-        console.error(err);
-        return res.status(500).json({ message: 'Erreur serveur' });
+        console.error('Erreur lors de la récupération de l\'utilisateur courant:', err);
+        return res.status(500).json({ message: 'Erreur serveur', details: err instanceof Error ? err.message : 'Erreur inconnue' });
     }
 });
 exports.getCurrentUser = getCurrentUser;
 const updateUser = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
     try {
         const userId = parseInt(req.params.id);
         if (isNaN(userId)) {
@@ -539,59 +544,116 @@ const updateUser = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
         if (!req.user || (req.user.role !== 'ADMIN' && req.user.id !== userId)) {
             return res.status(403).json({ message: 'Accès refusé. Seuls les administrateurs ou le propriétaire peuvent modifier cet utilisateur.' });
         }
-        const data = updateUserSchema.parse(req.body);
-        if (req.user.role !== 'ADMIN' && (data.role || data.status)) {
+        const file = req.file;
+        const body = updateUserSchema.parse(req.body);
+        if (req.user.role !== 'ADMIN' && (body.role || body.status)) {
             return res.status(403).json({ message: 'Seuls les administrateurs peuvent modifier le rôle ou le statut.' });
         }
-        const hashedPassword = data.password ? yield bcrypt_1.default.hash(data.password, 10) : undefined;
+        const existingUser = yield prisma.user.findUnique({ where: { id: userId }, select: { image: true } });
+        if (!existingUser) {
+            return res.status(404).json({ message: 'Utilisateur non trouvé' });
+        }
+        let imageUrl = existingUser.image;
+        if (file) {
+            if (imageUrl) {
+                try {
+                    const url = new URL(imageUrl);
+                    yield (0, blob_1.del)(url.pathname.slice(1));
+                }
+                catch (error) {
+                    console.warn(`Ancien blob non supprimé, URL invalide : ${imageUrl}`);
+                }
+            }
+            const newFilename = `users/${Date.now()}-${Math.round(Math.random() * 1e9)}${file.originalname ? (_a = file.originalname.match(/\.[0-9a-z]+$/i)) === null || _a === void 0 ? void 0 : _a[0] : '.jpg'}`;
+            const result = yield (0, blob_1.put)(newFilename, file.buffer, {
+                access: 'public',
+                token: process.env.BLOB_READ_WRITE_TOKEN,
+            });
+            imageUrl = result.url;
+        }
+        const hashedPassword = body.password ? yield bcrypt_1.default.hash(body.password, 10) : undefined;
         const updatedUser = yield prisma.user.update({
             where: { id: userId },
             data: {
-                email: data.email,
-                phone: data.phone,
-                nom: data.nom,
-                prenom: data.prenom,
-                image: data.image,
-                address: data.address,
-                role: data.role,
-                status: data.status,
-                emailVerified: data.emailVerified,
+                email: body.email,
+                phone: body.phone,
+                nom: body.nom,
+                prenom: body.prenom,
+                image: imageUrl,
+                address: body.address,
+                role: body.role,
+                status: body.status,
+                emailVerified: body.emailVerified,
                 password: hashedPassword,
+            },
+            select: {
+                id: true,
+                email: true,
+                phone: true,
+                nom: true,
+                prenom: true,
+                image: true,
+                address: true,
+                role: true,
+                status: true,
+                emailVerified: true,
+                createdAt: true,
+                updatedAt: true,
             },
         });
         return res.status(200).json({ message: 'Utilisateur mis à jour avec succès', user: updatedUser });
     }
     catch (err) {
-        console.error(err);
+        console.error('Erreur lors de la mise à jour de l\'utilisateur:', err);
         if (err instanceof zod_1.z.ZodError) {
             return res.status(400).json({ message: 'Données invalides', errors: err.issues });
         }
         else if (err instanceof Error && 'code' in err && err.code === 'P2025') {
             return res.status(404).json({ message: 'Utilisateur non trouvé' });
         }
-        return res.status(500).json({ message: 'Erreur serveur' });
+        return res.status(500).json({ message: 'Erreur serveur', details: err instanceof Error ? err.message : 'Erreur inconnue' });
     }
 });
 exports.updateUser = updateUser;
 const updateCurrentUser = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
     try {
         if (!req.user) {
             return res.status(401).json({ message: 'Non authentifié' });
         }
-        // If a file was uploaded, use it
-        const image = req.file ? `/uploads/${req.file.filename}` : undefined;
-        // merge image into body for zod parsing
-        const body = Object.assign(Object.assign({}, req.body), (image ? { image } : {}));
-        const data = selfUpdateSchema.parse(body);
-        const hashedPassword = data.password ? yield bcrypt_1.default.hash(data.password, 10) : undefined;
+        const file = req.file;
+        const body = selfUpdateSchema.parse(req.body);
+        const existingUser = yield prisma.user.findUnique({ where: { id: req.user.id }, select: { image: true } });
+        if (!existingUser) {
+            return res.status(404).json({ message: 'Utilisateur non trouvé' });
+        }
+        let imageUrl = existingUser.image;
+        if (file) {
+            if (imageUrl) {
+                try {
+                    const url = new URL(imageUrl);
+                    yield (0, blob_1.del)(url.pathname.slice(1));
+                }
+                catch (error) {
+                    console.warn(`Ancien blob non supprimé, URL invalide : ${imageUrl}`);
+                }
+            }
+            const newFilename = `users/${Date.now()}-${Math.round(Math.random() * 1e9)}${file.originalname ? (_a = file.originalname.match(/\.[0-9a-z]+$/i)) === null || _a === void 0 ? void 0 : _a[0] : '.jpg'}`;
+            const result = yield (0, blob_1.put)(newFilename, file.buffer, {
+                access: 'public',
+                token: process.env.BLOB_READ_WRITE_TOKEN,
+            });
+            imageUrl = result.url;
+        }
+        const hashedPassword = body.password ? yield bcrypt_1.default.hash(body.password, 10) : undefined;
         const updatedUser = yield prisma.user.update({
             where: { id: req.user.id },
             data: {
-                phone: data.phone,
-                nom: data.nom,
-                prenom: data.prenom,
-                image: data.image,
-                address: data.address,
+                phone: body.phone,
+                nom: body.nom,
+                prenom: body.prenom,
+                image: imageUrl,
+                address: body.address,
                 password: hashedPassword,
             },
             select: {
@@ -612,14 +674,14 @@ const updateCurrentUser = (req, res) => __awaiter(void 0, void 0, void 0, functi
         return res.status(200).json({ message: 'Profil mis à jour avec succès', user: updatedUser });
     }
     catch (err) {
-        console.error(err);
+        console.error('Erreur lors de la mise à jour du profil:', err);
         if (err instanceof zod_1.z.ZodError) {
             return res.status(400).json({ message: 'Données invalides', errors: err.issues });
         }
         else if (err instanceof Error && 'code' in err && err.code === 'P2025') {
             return res.status(404).json({ message: 'Utilisateur non trouvé' });
         }
-        return res.status(500).json({ message: 'Erreur serveur' });
+        return res.status(500).json({ message: 'Erreur serveur', details: err instanceof Error ? err.message : 'Erreur inconnue' });
     }
 });
 exports.updateCurrentUser = updateCurrentUser;
@@ -632,17 +694,30 @@ const deleteUser = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
         if (!req.user || (req.user.role !== 'ADMIN' && req.user.id !== userId)) {
             return res.status(403).json({ message: 'Accès refusé. Seuls les administrateurs ou le propriétaire peuvent supprimer cet utilisateur.' });
         }
+        const user = yield prisma.user.findUnique({ where: { id: userId }, select: { image: true } });
+        if (!user) {
+            return res.status(404).json({ message: 'Utilisateur non trouvé' });
+        }
+        if (user.image) {
+            try {
+                const url = new URL(user.image);
+                yield (0, blob_1.del)(url.pathname.slice(1));
+            }
+            catch (error) {
+                console.warn(`Ancien blob non supprimé, URL invalide : ${user.image}`);
+            }
+        }
         yield prisma.user.delete({
             where: { id: userId },
         });
         return res.status(200).json({ message: 'Utilisateur supprimé avec succès' });
     }
     catch (err) {
-        console.error(err);
+        console.error('Erreur lors de la suppression de l\'utilisateur:', err);
         if (err instanceof Error && 'code' in err && err.code === 'P2025') {
             return res.status(404).json({ message: 'Utilisateur non trouvé' });
         }
-        return res.status(500).json({ message: 'Erreur serveur' });
+        return res.status(500).json({ message: 'Erreur serveur', details: err instanceof Error ? err.message : 'Erreur inconnue' });
     }
 });
 exports.deleteUser = deleteUser;
