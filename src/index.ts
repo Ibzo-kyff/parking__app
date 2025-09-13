@@ -1,5 +1,4 @@
 import express from 'express';
-import path from 'path';
 import authRoutes from './routes/authRoutes';
 import { PrismaClient } from '@prisma/client';
 import cookieParser from 'cookie-parser';
@@ -7,15 +6,14 @@ import vehiculeRoutes from './routes/vehiculeRoutes';
 import parkingRoutes from './routes/parkingRoutes';
 import reservationRoutes from './routes/reservationRoute';
 import notificationRoutes from './routes/notificationRoute';
-import multer from 'multer';
+
 const app = express();
 const prisma = new PrismaClient();
 
 app.use(express.json());
 app.use(cookieParser());
 
-// Ajout pour servir les dossiers statiques
-app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+// Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/vehicules', vehiculeRoutes);
 app.use('/api/parkings', parkingRoutes);
@@ -27,7 +25,7 @@ app.use((err: unknown, _req: express.Request, res: express.Response, _next: expr
   if (err && typeof err === 'object' && 'name' in err && (err as any).name === 'MulterError') {
     return res.status(400).json({
       error: (err as any).message || 'Erreur upload',
-      hint: "Utilisez Body=form-data avec un champ 'image'/'logo' ou 'file' de type Fichier. Ne laissez pas le nom de champ vide."
+      hint: "Utilisez Body=form-data avec un champ 'image' ou 'photos' de type Fichier. Ne laissez pas le nom de champ vide."
     });
   }
   if (err instanceof Error) {

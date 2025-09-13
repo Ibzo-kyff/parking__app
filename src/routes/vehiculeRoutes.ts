@@ -9,27 +9,17 @@ import {
   getDistinctModels,
   getRecentParkings,
   getParkingStats,
-  getParkingUserVehicles, // Ajouter cette importation
+  getParkingUserVehicles,
   getParkingUserVehicleById,
   getParkingManagementData
 } from '../controllers/vehiculeController';
-import { authenticateToken } from '../middleware/authMiddleware'; // Import du middleware d'authentification
+import { authenticateToken } from '../middleware/authMiddleware';
 import multer from 'multer';
-import path from 'path';
 
 const router = Router();
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, path.join(__dirname, "../../uploads")); // Dossier uploads à la racine du projet
-  },
-  filename: (req, file, cb) => {
-    // Génère un nom unique
-    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
-    const ext = path.extname(file.originalname);
-    cb(null, uniqueSuffix + ext);
-  },
-});
 
+// Config Multer en mémoire (buffer) pour Vercel
+const storage = multer.memoryStorage(); // Changement ici : pas de diskStorage
 const upload = multer({ storage });
 
 // Routes spécifiques d'abord
@@ -42,14 +32,14 @@ router.get('/parking/my-vehicles', authenticateToken, getParkingUserVehicles);
 router.get('/parking/stats', authenticateToken, getParkingStats);
 
 // Routes générales ensuite
-router.post("/", upload.array("photos"), createVehicule);
+router.post('/', upload.array('photos'), createVehicule);
 router.get('/', getAllVehicules);
 
 // Routes paramétrées en dernier
 router.get('/parking/management', authenticateToken, getParkingManagementData);
 router.get('/:id', getVehiculeById);
 router.get('/parking/my-vehicles/:id', authenticateToken, getParkingUserVehicleById);
-router.put('/:id', updateVehicule);
+router.put('/:id', upload.array('photos'), updateVehicule);
 router.delete('/:id', deleteVehicule);
 
 export default router;

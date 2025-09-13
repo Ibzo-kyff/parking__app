@@ -35,15 +35,21 @@ export const createParking = async (req: Request, res: Response) => {
       return res.status(400).json({ error: "Un parking est déjà associé à cet utilisateur." });
     }
 
-    let logo: string | undefined;
+    let logoUrl: string | undefined = undefined;
+
     if (req.file) {
-      // Upload vers Vercel Blob
-      const newFilename = `${Date.now()}-${Math.round(Math.random() * 1e9)}${req.file.originalname ? path.extname(req.file.originalname) : '.png'}`; // Utilisez path si importé, sinon adaptez
-      const result = await put(newFilename, req.file.buffer, {
-        access: 'public', 
-        token: process.env.BLOB_READ_WRITE_TOKEN,
-      });
-      logo = result.url; 
+      try {
+        // Upload vers Vercel Blob
+        const blob = await put(`parking-${Date.now()}-${Math.round(Math.random() * 1e9)}.png`, 
+          req.file.buffer, {
+            access: 'public',
+          }
+        );
+        logoUrl = blob.url;
+      } catch (uploadError) {
+        console.error('Erreur upload Vercel Blob:', uploadError);
+        return res.status(500).json({ error: 'Erreur lors du téléchargement de l\'image' });
+      }
     }
 
     const newParking = await prisma.parking.create({
@@ -58,17 +64,16 @@ export const createParking = async (req: Request, res: Response) => {
         capacity: capacity ? Number(capacity) : 0,
         hoursOfOperation,
         status: status || ParkingStatus.ACTIVE,
-        logo
+        logo: logoUrl
       }
     });
 
     return res.status(201).json({ message: 'Parking créé avec succès', parking: newParking });
   } catch (err: any) {
     console.error(err);
-    return res.status(500).json({ error: 'Erreur lors de la création du parking', details: err.message || err });
+    return res.status(500).json({ error: 'Erreur lors de la création du parking', details: err.message });
   }
 };
-
 // GET ALL PARKINGS (inchangé)
 export const getAllParkings = async (_req: Request, res: Response) => {
   try {
@@ -123,11 +128,15 @@ export const updateParking = async (req: Request, res: Response) => {
     let newLogo = parking.logo;
 
     if (req.file) {
-      // Supprimer l'ancien logo si existant (optionnel, pour nettoyer le storage)
+      // Supprimer l'ancien logo si existant et si c'est une URL valide
       if (parking.logo) {
-        // Extraire le pathname de l'URL blob (ex. : /uploads/filename.png)
-        const url = new URL(parking.logo);
-        await del(url.pathname.slice(1)); // del() supprime le blob par son chemin
+        try {
+          const url = new URL(parking.logo);
+          await del(url.pathname.slice(1)); // Supprime le blob si c'est une URL valide
+        } catch (error) {
+          // Si parking.logo n'est pas une URL valide, on ignore l'erreur (ancien chemin local par ex.)
+          console.warn(`Ancien logo non supprimé, URL invalide : ${parking.logo}`);
+        }
       }
 
       // Upload nouveau logo vers Vercel Blob

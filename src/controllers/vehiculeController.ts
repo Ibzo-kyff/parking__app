@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { PrismaClient, Role } from '@prisma/client';
 import { AuthRequest } from '../middleware/authMiddleware';
+import { put, del } from '@vercel/blob';
 
 const prisma = new PrismaClient();
 
@@ -25,36 +26,33 @@ export const createVehicule = async (req: Request, res: Response) => {
       mileage,
     } = req.body;
 
-    // Ajouter un log pour voir les données reçues
-    console.log("Données reçues dans req.body :", req.body);
-
     // Validation des champs obligatoires
     if (!marque || !model || !prix) {
-      return res.status(400).json({ error: "Les champs marque, modèle et prix sont obligatoires." });
+      return res.status(400).json({ error: 'Les champs marque, modèle et prix sont obligatoires.' });
     }
 
     if ((userOwnerId && parkingId) || (!userOwnerId && !parkingId)) {
       return res.status(400).json({
-        error: "Un véhicule doit appartenir soit à un utilisateur (userOwnerId), soit à un parking (parkingId), mais pas aux deux ou aucun.",
+        error: 'Un véhicule doit appartenir soit à un utilisateur (userOwnerId), soit à un parking (parkingId), mais pas aux deux ou aucun.',
       });
     }
 
     // Valider le format des champs booléens
-    const parsedGarantie = garantie === "true" ? true : false;
-    const parsedChauffeur = chauffeur === "true" ? true : false;
-    const parsedAssurance = assurance === "true" ? true : false;
-    const parsedCarteGrise = carteGrise === "true" ? true : false;
-    const parsedVignette = vignette === "true" ? true : false;
+    const parsedGarantie = garantie === 'true' ? true : false;
+    const parsedChauffeur = chauffeur === 'true' ? true : false;
+    const parsedAssurance = assurance === 'true' ? true : false;
+    const parsedCarteGrise = carteGrise === 'true' ? true : false;
+    const parsedVignette = vignette === 'true' ? true : false;
 
     // Valider le format des champs numériques
     const parsedPrix = Number(prix);
     if (isNaN(parsedPrix)) {
-      return res.status(400).json({ error: "Le prix doit être un nombre valide." });
+      return res.status(400).json({ error: 'Le prix doit être un nombre valide.' });
     }
 
     const parsedDureeGarantie = dureeGarantie ? Number(dureeGarantie) : null;
     if (parsedGarantie && !parsedDureeGarantie) {
-      return res.status(400).json({ error: "La durée de garantie est obligatoire si la garantie est activée." });
+      return res.status(400).json({ error: 'La durée de garantie est obligatoire si la garantie est activée.' });
     }
 
     const parsedDureeAssurance = dureeAssurance ? Number(dureeAssurance) : null;
@@ -64,15 +62,26 @@ export const createVehicule = async (req: Request, res: Response) => {
 
     const parsedMileage = mileage ? Number(mileage) : null;
 
-    // multer place les fichiers dans req.files
-    const photos = (req.files as Express.Multer.File[])?.map((f) => `/uploads/${f.filename}`) || [];
+    // Uploader les photos vers Vercel Blob
+    const files = req.files as Express.Multer.File[];
+    const photos: string[] = [];
+    if (files && files.length > 0) {
+      for (const file of files) {
+        const newFilename = `vehicles/${Date.now()}-${Math.round(Math.random() * 1e9)}${file.originalname ? file.originalname.match(/\.[0-9a-z]+$/i)?.[0] : '.jpg'}`;
+        const result = await put(newFilename, file.buffer, {
+          access: 'public',
+          token: process.env.BLOB_READ_WRITE_TOKEN,
+        });
+        photos.push(result.url);
+      }
+    }
 
     const vehicule = await prisma.vehicle.create({
       data: {
         marque,
         model,
         prix: parsedPrix,
-        description: description || "",
+        description: description || '',
         fuelType,
         mileage: parsedMileage,
         garantie: parsedGarantie,
@@ -88,7 +97,7 @@ export const createVehicule = async (req: Request, res: Response) => {
       },
     });
 
-    return res.status(201).json({ message: "Véhicule enregistré avec succès", vehicule });
+    return res.status(201).json({ message: 'Véhicule enregistré avec succès', vehicule });
   } catch (err) {
     console.error("Erreur lors de la création du véhicule :", err);
     return res.status(500).json({
@@ -97,6 +106,7 @@ export const createVehicule = async (req: Request, res: Response) => {
     });
   }
 };
+
 // GET ALL VEHICULES WITH FILTERS
 export const getAllVehicules = async (req: Request, res: Response) => {
   const {
@@ -204,43 +214,101 @@ export const updateVehicule = async (req: Request, res: Response) => {
   const { id } = req.params;
   const {
     marque,
+    model,
     prix,
     description,
-    photos,
     garantie,
     dureeGarantie,
-    documents,
     chauffeur,
     assurance,
     dureeAssurance,
     carteGrise,
     vignette,
-    status
+    fuelType,
+    mileage,
+    status,
   } = req.body;
 
   try {
+    // Vérifier si le véhicule existe
+    const vehicule = await prisma.vehicle.findUnique({ where: { id: parseInt(id) } });
+    if (!vehicule) {
+      return res.status(404).json({ error: 'Véhicule non trouvé' });
+    }
+
+    // Valider les champs numériques si fournis
+    const parsedPrix = prix ? Number(prix) : undefined;
+    if (prix && parsedPrix !== undefined && isNaN(parsedPrix)) {
+      return res.status(400).json({ error: 'Le prix doit être un nombre valide.' });
+    }
+    const parsedDureeGarantie = dureeGarantie ? Number(dureeGarantie) : undefined;
+    if (garantie === 'true' && parsedDureeGarantie == null) {
+      return res.status(400).json({ error: 'La durée de garantie est obligatoire si la garantie est activée.' });
+    }
+
+    const parsedDureeAssurance = dureeAssurance ? Number(dureeAssurance) : undefined;
+    if (assurance === 'true' && parsedDureeAssurance == null) {
+      return res.status(400).json({ error: "La durée d'assurance est obligatoire si l'assurance est activée." });
+    }
+
+    const parsedMileage = mileage ? Number(mileage) : undefined;
+
+    // Gérer les nouvelles photos
+    let photos = vehicule.photos; // Garder les photos existantes par défaut
+    const files = req.files as Express.Multer.File[];
+    if (files && files.length > 0) {
+      // Supprimer les anciens blobs si existants
+      if (photos && photos.length > 0) {
+        for (const photo of photos) {
+          try {
+            const url = new URL(photo);
+            await del(url.pathname.slice(1));
+          } catch (error) {
+            console.warn(`Ancien blob non supprimé, URL invalide : ${photo}`);
+          }
+        }
+      }
+
+      // Uploader les nouvelles photos
+      photos = [];
+      for (const file of files) {
+        const newFilename = `vehicles/${Date.now()}-${Math.round(Math.random() * 1e9)}${file.originalname ? file.originalname.match(/\.[0-9a-z]+$/i)?.[0] : '.jpg'}`;
+        const result = await put(newFilename, file.buffer, {
+          access: 'public',
+          token: process.env.BLOB_READ_WRITE_TOKEN,
+        });
+        photos.push(result.url);
+      }
+    }
+
     const updatedVehicule = await prisma.vehicle.update({
       where: { id: parseInt(id) },
       data: {
         marque,
-        prix,
+        model,
+        prix: parsedPrix,
         description,
+        fuelType,
+        mileage: parsedMileage,
+        garantie: garantie === 'true' ? true : garantie === 'false' ? false : undefined,
+        dureeGarantie: parsedDureeGarantie,
+        chauffeur: chauffeur === 'true' ? true : chauffeur === 'false' ? false : undefined,
+        assurance: assurance === 'true' ? true : assurance === 'false' ? false : undefined,
+        dureeAssurance: parsedDureeAssurance,
+        carteGrise: carteGrise === 'true' ? true : carteGrise === 'false' ? false : undefined,
+        vignette: vignette === 'true' ? true : vignette === 'false' ? false : undefined,
+        status,
         photos,
-        garantie,
-        dureeGarantie,
-        documents,
-        chauffeur,
-        assurance,
-        dureeAssurance,
-        carteGrise,
-        vignette,
-        status
-      }
+      },
     });
 
     return res.json({ message: 'Véhicule mis à jour', vehicule: updatedVehicule });
   } catch (err) {
-    return res.status(500).json({ error: 'Erreur lors de la mise à jour du véhicule' });
+    console.error('Erreur lors de la mise à jour du véhicule :', err);
+    return res.status(500).json({
+      error: 'Erreur lors de la mise à jour du véhicule',
+      details: err instanceof Error ? err.message : 'Erreur inconnue',
+    });
   }
 };
 
@@ -250,11 +318,29 @@ export const deleteVehicule = async (req: Request, res: Response) => {
   const vehiculeId = parseInt(id, 10);
 
   if (isNaN(vehiculeId)) {
-    return res.status(400).json({ error: "ID invalide" });
+    return res.status(400).json({ error: 'ID invalide' });
   }
 
   try {
-    // Supprimer d'abord les dépendances (si pas de cascade dans schema.prisma)
+    // Vérifier si le véhicule existe et récupérer les photos
+    const vehicule = await prisma.vehicle.findUnique({ where: { id: vehiculeId }, select: { photos: true } });
+    if (!vehicule) {
+      return res.status(404).json({ error: 'Véhicule introuvable' });
+    }
+
+    // Supprimer les blobs associés aux photos
+    if (vehicule.photos && vehicule.photos.length > 0) {
+      for (const photo of vehicule.photos) {
+        try {
+          const url = new URL(photo);
+          await del(url.pathname.slice(1));
+        } catch (error) {
+          console.warn(`Ancien blob non supprimé, URL invalide : ${photo}`);
+        }
+      }
+    }
+
+    // Supprimer les dépendances
     await prisma.reservation.deleteMany({ where: { vehicleId: vehiculeId } });
     await prisma.vehicleHistory.deleteMany({ where: { vehicleId: vehiculeId } });
     await prisma.favorite.deleteMany({ where: { vehicleId: vehiculeId } });
@@ -262,25 +348,26 @@ export const deleteVehicule = async (req: Request, res: Response) => {
 
     // Puis supprimer le véhicule
     await prisma.vehicle.delete({
-      where: { id: vehiculeId }
+      where: { id: vehiculeId },
     });
 
-    return res.json({ message: "Véhicule supprimé avec succès" });
+    return res.json({ message: 'Véhicule supprimé avec succès' });
   } catch (err: any) {
-    console.error("Erreur suppression véhicule:", err);
-
-    if (err.code === "P2025") {
-      return res.status(404).json({ error: "Véhicule introuvable" });
+    console.error('Erreur suppression véhicule:', err);
+    if (err.code === 'P2025') {
+      return res.status(404).json({ error: 'Véhicule introuvable' });
     }
-
-    if (err.code === "P2003") {
-      return res.status(400).json({ error: "Impossible de supprimer : véhicule lié à d’autres données" });
+    if (err.code === 'P2003') {
+      return res.status(400).json({ error: 'Impossible de supprimer : véhicule lié à d’autres données' });
     }
-
-    return res.status(500).json({ error: "Erreur lors de la suppression du véhicule" });
+    return res.status(500).json({
+      error: 'Erreur lors de la suppression du véhicule',
+      details: err.message || 'Erreur inconnue',
+    });
   }
 };
 
+// GET DISTINCT MARQUES
 export const getDistinctMarques = async (_req: Request, res: Response) => {
   try {
     const marques = await prisma.vehicle.findMany({
@@ -318,7 +405,7 @@ export const getRecentParkings = async (_req: Request, res: Response) => {
       take: 4,
       select: {
         id: true,
-        logo: true // Assumes parking has a 'photos' field similar to vehicles; adjust if it's 'logo' or another field
+        logo: true
       }
     });
     return res.json(parkings);
@@ -326,6 +413,7 @@ export const getRecentParkings = async (_req: Request, res: Response) => {
     return res.status(500).json({ error: 'Erreur lors de la récupération des parkings récents' });
   }
 };
+
 // GET VEHICLES FOR PARKING USER WITH STATS
 export const getParkingUserVehicles = async (req: AuthRequest, res: Response) => {
   try {
@@ -434,7 +522,8 @@ export const getParkingUserVehicles = async (req: AuthRequest, res: Response) =>
     });
   }
 };
-// Optionnel : Ajouter une route pour les statistiques détaillées
+
+// GET PARKING STATS
 export const getParkingStats = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user || req.user.role !== Role.PARKING) {
@@ -502,7 +591,7 @@ export const getParkingUserVehicleById = async (req: AuthRequest, res: Response)
     const vehicle = await prisma.vehicle.findFirst({
       where: { 
         id: vehicleId,
-        parkingId: parking.id // Vérifier que le véhicule appartient bien au parking de l'utilisateur
+        parkingId: parking.id
       },
       include: {
         userOwner: {
@@ -604,7 +693,8 @@ export const getParkingUserVehicleById = async (req: AuthRequest, res: Response)
     });
   }
 };
-// NOUVELLE MÉTHODE POUR LA PAGE DE GESTION DU PARKING
+
+// GET PARKING MANAGEMENT DATA
 export const getParkingManagementData = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user || req.user.role !== Role.PARKING) {
@@ -671,7 +761,7 @@ export const getParkingManagementData = async (req: AuthRequest, res: Response) 
         reservations: {
           where: {
             dateFin: {
-              gte: new Date() // Réservations actives ou futures
+              gte: new Date()
             }
           },
           select: {
@@ -728,13 +818,10 @@ export const getParkingManagementData = async (req: AuthRequest, res: Response) 
       disponibles: vehicles.filter(v => v.status === 'DISPONIBLE').length,
       enMaintenance: vehicles.filter(v => v.status === 'EN_MAINTENANCE').length,
       indisponibles: vehicles.filter(v => v.status === 'INDISPONIBLE').length,
-      
       totalVues: vehicles.reduce((sum, vehicle) => sum + (vehicle.stats?.vues || 0), 0),
       totalReservations: vehicles.reduce((sum, vehicle) => sum + (vehicle.stats?.reservations || 0), 0),
       totalFavoris: vehicles.reduce((sum, vehicle) => sum + vehicle.favorites.length, 0),
       reservationsActives: activeReservations.length,
-
-      // Statistiques pour les graphiques
       monthlySales: monthlyReservations.filter(r => r.type === 'ACHAT').reduce((sum, r) => sum + r._count.id, 0),
       monthlyRentals: monthlyReservations.filter(r => r.type === 'LOCATION').reduce((sum, r) => sum + r._count.id, 0)
     };
@@ -751,7 +838,6 @@ export const getParkingManagementData = async (req: AuthRequest, res: Response) 
       status: vehicle.status,
       photos: vehicle.photos,
       createdAt: vehicle.createdAt,
-      
       stats: {
         vues: vehicle.stats?.vues || 0,
         reservations: vehicle.stats?.reservations || 0,
@@ -760,8 +846,6 @@ export const getParkingManagementData = async (req: AuthRequest, res: Response) 
           new Date(r.dateDebut) <= now && new Date(r.dateFin) >= now
         ).length
       },
-      
-      // Prochaine réservation
       nextReservation: vehicle.reservations[0] ? {
         type: vehicle.reservations[0].type,
         date: vehicle.reservations[0].dateDebut,
