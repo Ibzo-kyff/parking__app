@@ -616,34 +616,61 @@ const updateUser = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
 });
 exports.updateUser = updateUser;
 const updateCurrentUser = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _a, _b;
     try {
         if (!req.user) {
             return res.status(401).json({ message: 'Non authentifié' });
         }
         const file = req.file;
         const body = selfUpdateSchema.parse(req.body);
-        const existingUser = yield prisma.user.findUnique({ where: { id: req.user.id }, select: { image: true } });
+        console.log('File received:', file ? {
+            originalname: file.originalname,
+            size: file.size,
+            bufferLength: (_a = file.buffer) === null || _a === void 0 ? void 0 : _a.length,
+            mimetype: file.mimetype
+        } : 'No file');
+        const existingUser = yield prisma.user.findUnique({
+            where: { id: req.user.id },
+            select: { image: true }
+        });
         if (!existingUser) {
             return res.status(404).json({ message: 'Utilisateur non trouvé' });
         }
         let imageUrl = existingUser.image;
-        if (file) {
+        if (file && file.buffer && file.buffer.length > 0) {
+            console.log('Uploading file to Vercel Blob...');
             if (imageUrl) {
                 try {
                     const url = new URL(imageUrl);
                     yield (0, blob_1.del)(url.pathname.slice(1));
+                    console.log('Old blob deleted successfully');
                 }
                 catch (error) {
                     console.warn(`Ancien blob non supprimé, URL invalide : ${imageUrl}`);
                 }
             }
-            const newFilename = `users/${Date.now()}-${Math.round(Math.random() * 1e9)}${file.originalname ? (_a = file.originalname.match(/\.[0-9a-z]+$/i)) === null || _a === void 0 ? void 0 : _a[0] : '.jpg'}`;
-            const result = yield (0, blob_1.put)(newFilename, file.buffer, {
-                access: 'public',
-                token: process.env.BLOB_READ_WRITE_TOKEN,
-            });
-            imageUrl = result.url;
+            const fileExtension = file.originalname ?
+                ((_b = file.originalname.match(/\.[0-9a-z]+$/i)) === null || _b === void 0 ? void 0 : _b[0]) || '.jpg' :
+                '.jpg';
+            const newFilename = `users/${Date.now()}-${Math.round(Math.random() * 1e9)}${fileExtension}`;
+            try {
+                const result = yield (0, blob_1.put)(newFilename, file.buffer, {
+                    access: 'public',
+                    token: process.env.BLOB_READ_WRITE_TOKEN,
+                });
+                imageUrl = result.url;
+                console.log('File uploaded to Vercel Blob:', imageUrl);
+            }
+            catch (blobError) {
+                console.error('Vercel Blob upload error:', blobError);
+                return res.status(500).json({
+                    message: 'Erreur lors de l\'upload de l\'image',
+                    details: 'Échec de l\'upload Vercel Blob'
+                });
+            }
+        }
+        else if (file) {
+            console.warn('Fichier reçu mais buffer vide, ignoré');
         }
         const hashedPassword = body.password ? yield bcrypt_1.default.hash(body.password, 10) : undefined;
         const updatedUser = yield prisma.user.update({
