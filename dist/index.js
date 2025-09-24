@@ -20,6 +20,7 @@ const vehiculeRoutes_1 = __importDefault(require("./routes/vehiculeRoutes"));
 const parkingRoutes_1 = __importDefault(require("./routes/parkingRoutes"));
 const reservationRoute_1 = __importDefault(require("./routes/reservationRoute"));
 const notificationRoute_1 = __importDefault(require("./routes/notificationRoute"));
+const marqueRoutes_1 = __importDefault(require("./routes/marqueRoutes"));
 const app = (0, express_1.default)();
 const prisma = new client_1.PrismaClient();
 app.use(express_1.default.json());
@@ -30,6 +31,7 @@ app.use('/api/vehicules', vehiculeRoutes_1.default);
 app.use('/api/parkings', parkingRoutes_1.default);
 app.use('/api/reservations', reservationRoute_1.default);
 app.use('/api/notifications', notificationRoute_1.default);
+app.use('/api/marques', marqueRoutes_1.default);
 // Middleware global d'erreurs (Multer + génériques)
 app.use((err, _req, res, _next) => {
     if (err && typeof err === 'object' && 'name' in err && err.name === 'MulterError') {

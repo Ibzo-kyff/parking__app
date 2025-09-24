@@ -16,9 +16,22 @@ const prisma = new client_1.PrismaClient();
 // Schéma de validation
 const reservationSchema = zod_1.z.object({
     vehicleId: zod_1.z.number(),
-    dateDebut: zod_1.z.string().datetime(),
-    dateFin: zod_1.z.string().datetime(),
+    dateDebut: zod_1.z.string().datetime().optional().nullable(), // Optionnel et peut être null
+    dateFin: zod_1.z.string().datetime().optional().nullable(), // Optionnel et peut être null
     type: zod_1.z.nativeEnum(client_1.ReservationType),
+}).refine((data) => {
+    // Vérification : Si type est LOCATION, dateDebut et dateFin doivent être fournis
+    if (data.type === client_1.ReservationType.LOCATION) {
+        return (data.dateDebut !== null &&
+            data.dateDebut !== undefined &&
+            data.dateFin !== null &&
+            data.dateFin !== undefined &&
+            new Date(data.dateDebut) < new Date(data.dateFin));
+    }
+    // Pour ACHAT, les dates peuvent être null
+    return true;
+}, {
+    message: 'Les dates de début et de fin sont requises pour une location et doivent être valides',
 });
 // Créer une réservation
 const createReservation = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
@@ -28,10 +41,11 @@ const createReservation = (req, res) => __awaiter(void 0, void 0, void 0, functi
         const data = reservationSchema.parse(req.body);
         const { vehicleId, dateDebut, dateFin, type } = data;
         const userId = req.user.id;
-        const startDate = new Date(dateDebut);
-        const endDate = new Date(dateFin);
-        if (startDate >= endDate) {
-            return res.status(400).json({ message: 'La date de fin doit être après la date de début' });
+        let startDate = dateDebut ? new Date(dateDebut) : null;
+        let endDate = dateFin ? new Date(dateFin) : null;
+        // Vérification spécifique pour LOCATION
+        if (type === client_1.ReservationType.LOCATION && (!startDate || !endDate || startDate >= endDate)) {
+            return res.status(400).json({ message: 'La date de fin doit être après la date de début pour une location' });
         }
         const vehicle = yield prisma.vehicle.findUnique({
             where: { id: vehicleId },
@@ -40,22 +54,32 @@ const createReservation = (req, res) => __awaiter(void 0, void 0, void 0, functi
         if (!vehicle) {
             return res.status(404).json({ message: 'Véhicule non trouvé' });
         }
+        // Vérifier les contraintes transactionnelles
+        if (type === client_1.ReservationType.ACHAT && !vehicle.forSale) {
+            return res.status(400).json({ message: 'Ce véhicule n\'est pas destiné à la vente' });
+        }
+        if (type === client_1.ReservationType.LOCATION && !vehicle.forRent) {
+            return res.status(400).json({ message: 'Ce véhicule n\'est pas destiné à la location' });
+        }
         if (vehicle.status !== client_1.VehicleStatus.DISPONIBLE) {
             return res.status(400).json({ message: 'Ce véhicule n\'est pas disponible' });
         }
-        const conflictingReservation = yield prisma.reservation.findFirst({
-            where: {
-                vehicleId,
-                OR: [
-                    {
-                        dateDebut: { lte: endDate },
-                        dateFin: { gte: startDate },
-                    },
-                ],
-            },
-        });
-        if (conflictingReservation) {
-            return res.status(400).json({ message: 'Le véhicule est déjà réservé pour cette période' });
+        // Vérifier les conflits uniquement pour LOCATION
+        if (type === client_1.ReservationType.LOCATION) {
+            const conflictingReservation = yield prisma.reservation.findFirst({
+                where: {
+                    vehicleId,
+                    OR: [
+                        {
+                            dateDebut: { lte: endDate },
+                            dateFin: { gte: startDate },
+                        },
+                    ],
+                },
+            });
+            if (conflictingReservation) {
+                return res.status(400).json({ message: 'Le véhicule est déjà réservé pour cette période' });
+            }
         }
         const commission = type === client_1.ReservationType.LOCATION ? vehicle.prix * 0.1 : null;
         const reservation = yield prisma.reservation.create({
@@ -72,10 +96,11 @@ const createReservation = (req, res) => __awaiter(void 0, void 0, void 0, functi
                 user: true,
             },
         });
+        // Mettre à jour le statut opérationnel
         yield prisma.vehicle.update({
             where: { id: vehicleId },
             data: {
-                status: type === client_1.ReservationType.ACHAT ? client_1.VehicleStatus.ACHETE : client_1.VehicleStatus.EN_LOCATION,
+                status: type === client_1.ReservationType.ACHAT ? client_1.VehicleStatus.INDISPONIBLE : client_1.VehicleStatus.DISPONIBLE,
             },
         });
         yield prisma.vehicleStats.upsert({
@@ -223,21 +248,23 @@ const cancelReservation = (req, res) => __awaiter(void 0, void 0, void 0, functi
                 return res.status(403).json({ message: 'Accès non autorisé' });
             }
         }
-        const now = new Date();
-        const minCancelTime = new Date(reservation.dateDebut);
-        minCancelTime.setDate(minCancelTime.getDate() - 1);
-        if (now > minCancelTime) {
-            return res.status(400).json({ message: 'Annulation impossible moins de 24h avant' });
+        // Ne vérifier les 24h que pour les locations
+        if (reservation.type === client_1.ReservationType.LOCATION && reservation.dateDebut) {
+            const now = new Date();
+            const minCancelTime = new Date(reservation.dateDebut);
+            minCancelTime.setDate(minCancelTime.getDate() - 1);
+            if (now > minCancelTime) {
+                return res.status(400).json({ message: 'Annulation impossible moins de 24h avant' });
+            }
         }
         yield prisma.reservation.delete({
             where: { id: Number(id) },
         });
-        if (reservation.type === client_1.ReservationType.LOCATION) {
-            yield prisma.vehicle.update({
-                where: { id: reservation.vehicleId },
-                data: { status: client_1.VehicleStatus.DISPONIBLE },
-            });
-        }
+        // Restaurer le statut opérationnel
+        yield prisma.vehicle.update({
+            where: { id: reservation.vehicleId },
+            data: { status: client_1.VehicleStatus.DISPONIBLE },
+        });
         yield prisma.vehicleStats.update({
             where: { vehicleId: reservation.vehicleId },
             data: { reservations: { decrement: 1 } },
