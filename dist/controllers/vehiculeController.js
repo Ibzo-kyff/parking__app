@@ -17,10 +17,14 @@ const prisma = new client_1.PrismaClient();
 const createVehicule = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a;
     try {
-        const { userOwnerId, parkingId, marque, model, prix, description, garantie, dureeGarantie, chauffeur, assurance, dureeAssurance, carteGrise, vignette, fuelType, mileage, } = req.body;
+        const { userOwnerId, parkingId, marque, model, year, prix, description, garantie, dureeGarantie, chauffeur, assurance, dureeAssurance, carteGrise, vignette, fuelType, mileage, forSale, forRent, } = req.body;
         // Validation des champs obligatoires
         if (!marque || !model || !prix) {
             return res.status(400).json({ error: 'Les champs marque, modèle et prix sont obligatoires.' });
+        }
+        // Validation de la marque
+        if (typeof marque !== 'string' || marque.trim() === '') {
+            return res.status(400).json({ error: 'La marque doit être une chaîne de caractères non vide.' });
         }
         if ((userOwnerId && parkingId) || (!userOwnerId && !parkingId)) {
             return res.status(400).json({
@@ -33,10 +37,16 @@ const createVehicule = (req, res) => __awaiter(void 0, void 0, void 0, function*
         const parsedAssurance = assurance === 'true' ? true : false;
         const parsedCarteGrise = carteGrise === 'true' ? true : false;
         const parsedVignette = vignette === 'true' ? true : false;
+        const parsedForSale = forSale !== undefined ? forSale === 'true' : true;
+        const parsedForRent = forRent !== undefined ? forRent === 'true' : true;
         // Valider le format des champs numériques
         const parsedPrix = Number(prix);
         if (isNaN(parsedPrix)) {
             return res.status(400).json({ error: 'Le prix doit être un nombre valide.' });
+        }
+        const parsedYear = year ? Number(year) : null;
+        if (year && isNaN(parsedYear)) {
+            return res.status(400).json({ error: "L'année doit être un nombre valide." });
         }
         const parsedDureeGarantie = dureeGarantie ? Number(dureeGarantie) : null;
         if (parsedGarantie && !parsedDureeGarantie) {
@@ -47,6 +57,15 @@ const createVehicule = (req, res) => __awaiter(void 0, void 0, void 0, function*
             return res.status(400).json({ error: "La durée d'assurance est obligatoire si l'assurance est activée." });
         }
         const parsedMileage = mileage ? Number(mileage) : null;
+        // Gérer la marque (trouver ou créer, avec normalisation)
+        let marqueEntity = yield prisma.marque.findUnique({
+            where: { name: marque.toLowerCase() }, // Normalisation en minuscules pour éviter les doublons
+        });
+        if (!marqueEntity) {
+            marqueEntity = yield prisma.marque.create({
+                data: { name: marque.toLowerCase() }, // Créer avec nom normalisé
+            });
+        }
         // Uploader les photos vers Vercel Blob
         const files = req.files;
         const photos = [];
@@ -62,8 +81,9 @@ const createVehicule = (req, res) => __awaiter(void 0, void 0, void 0, function*
         }
         const vehicule = yield prisma.vehicle.create({
             data: {
-                marque,
+                marqueId: marqueEntity.id, // Utiliser l'ID de la marque
                 model,
+                year: parsedYear,
                 prix: parsedPrix,
                 description: description || '',
                 fuelType,
@@ -75,6 +95,8 @@ const createVehicule = (req, res) => __awaiter(void 0, void 0, void 0, function*
                 dureeAssurance: parsedDureeAssurance,
                 carteGrise: parsedCarteGrise,
                 vignette: parsedVignette,
+                forSale: parsedForSale,
+                forRent: parsedForRent,
                 photos,
                 userOwnerId: userOwnerId ? Number(userOwnerId) : undefined,
                 parkingId: parkingId ? Number(parkingId) : undefined,
@@ -86,18 +108,18 @@ const createVehicule = (req, res) => __awaiter(void 0, void 0, void 0, function*
         console.error("Erreur lors de la création du véhicule :", err);
         return res.status(500).json({
             error: "Erreur lors de la création du véhicule",
-            details: err instanceof Error ? err.message : "Erreur inconnue"
+            details: err instanceof Error ? err.message : "Erreur inconnue",
         });
     }
 });
 exports.createVehicule = createVehicule;
 // GET ALL VEHICULES WITH FILTERS
 const getAllVehicules = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    const { marque, model, minPrix, maxPrix, fuelType, maxMileage, withChauffeur, withGarantie, parkingId, userOwnerId, status } = req.query;
+    const { marque, model, minPrix, maxPrix, fuelType, maxMileage, withChauffeur, withGarantie, parkingId, userOwnerId, status, forSale, forRent, } = req.query;
     try {
         const where = {};
         if (marque) {
-            where.marque = { contains: marque, mode: 'insensitive' };
+            where.marqueRef = { name: { contains: marque, mode: 'insensitive' } };
         }
         if (model) {
             where.model = { contains: model, mode: 'insensitive' };
@@ -130,13 +152,20 @@ const getAllVehicules = (req, res) => __awaiter(void 0, void 0, void 0, function
         if (status) {
             where.status = status;
         }
+        if (forSale !== undefined) {
+            where.forSale = forSale === 'true';
+        }
+        if (forRent !== undefined) {
+            where.forRent = forRent === 'true';
+        }
         const vehicules = yield prisma.vehicle.findMany({
             where,
             include: {
                 parking: true,
                 userOwner: true,
                 stats: true,
-                favorites: true
+                favorites: true,
+                marqueRef: true
             }
         });
         return res.json(vehicules);
@@ -156,7 +185,8 @@ const getVehiculeById = (req, res) => __awaiter(void 0, void 0, void 0, function
                 parking: true,
                 userOwner: true,
                 stats: true,
-                favorites: true
+                favorites: true,
+                marqueRef: true
             }
         });
         if (!vehicule) {
@@ -173,7 +203,7 @@ exports.getVehiculeById = getVehiculeById;
 const updateVehicule = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a;
     const { id } = req.params;
-    const { marque, model, prix, description, garantie, dureeGarantie, chauffeur, assurance, dureeAssurance, carteGrise, vignette, fuelType, mileage, status, } = req.body;
+    const { marque, model, year, prix, description, garantie, dureeGarantie, chauffeur, assurance, dureeAssurance, carteGrise, vignette, fuelType, mileage, status, forSale, forRent, } = req.body;
     try {
         // Vérifier si le véhicule existe
         const vehicule = yield prisma.vehicle.findUnique({ where: { id: parseInt(id) } });
@@ -185,6 +215,10 @@ const updateVehicule = (req, res) => __awaiter(void 0, void 0, void 0, function*
         if (prix && parsedPrix !== undefined && isNaN(parsedPrix)) {
             return res.status(400).json({ error: 'Le prix doit être un nombre valide.' });
         }
+        const parsedYear = year ? Number(year) : undefined;
+        if (year && parsedYear !== undefined && isNaN(parsedYear)) {
+            return res.status(400).json({ error: "L'année doit être un nombre valide." });
+        }
         const parsedDureeGarantie = dureeGarantie ? Number(dureeGarantie) : undefined;
         if (garantie === 'true' && parsedDureeGarantie == null) {
             return res.status(400).json({ error: 'La durée de garantie est obligatoire si la garantie est activée.' });
@@ -194,6 +228,25 @@ const updateVehicule = (req, res) => __awaiter(void 0, void 0, void 0, function*
             return res.status(400).json({ error: "La durée d'assurance est obligatoire si l'assurance est activée." });
         }
         const parsedMileage = mileage ? Number(mileage) : undefined;
+        // Gérer la marque si fournie (trouver ou créer avec normalisation)
+        let marqueId = undefined;
+        if (marque) {
+            if (typeof marque !== 'string' || marque.trim() === '') {
+                return res.status(400).json({ error: 'La marque doit être une chaîne de caractères non vide.' });
+            }
+            let marqueEntity = yield prisma.marque.findUnique({
+                where: { name: marque.toLowerCase() }, // Normalisation en minuscules
+            });
+            if (!marqueEntity) {
+                marqueEntity = yield prisma.marque.create({
+                    data: { name: marque.toLowerCase() }, // Créer avec nom normalisé
+                });
+            }
+            marqueId = marqueEntity.id;
+        }
+        // Gérer les booléens forSale et forRent si fournis
+        const parsedForSale = forSale !== undefined ? forSale === 'true' : undefined;
+        const parsedForRent = forRent !== undefined ? forRent === 'true' : undefined;
         // Gérer les nouvelles photos
         let photos = vehicule.photos; // Garder les photos existantes par défaut
         const files = req.files;
@@ -224,8 +277,9 @@ const updateVehicule = (req, res) => __awaiter(void 0, void 0, void 0, function*
         const updatedVehicule = yield prisma.vehicle.update({
             where: { id: parseInt(id) },
             data: {
-                marque,
+                marqueId: marqueId !== undefined ? marqueId : vehicule.marqueId,
                 model,
+                year: parsedYear,
                 prix: parsedPrix,
                 description,
                 fuelType,
@@ -237,6 +291,8 @@ const updateVehicule = (req, res) => __awaiter(void 0, void 0, void 0, function*
                 dureeAssurance: parsedDureeAssurance,
                 carteGrise: carteGrise === 'true' ? true : carteGrise === 'false' ? false : undefined,
                 vignette: vignette === 'true' ? true : vignette === 'false' ? false : undefined,
+                forSale: parsedForSale,
+                forRent: parsedForRent,
                 status,
                 photos,
             },
@@ -245,6 +301,12 @@ const updateVehicule = (req, res) => __awaiter(void 0, void 0, void 0, function*
     }
     catch (err) {
         console.error('Erreur lors de la mise à jour du véhicule :', err);
+        if (err.code === 'P2002') {
+            return res.status(400).json({
+                error: 'Un doublon a été détecté pour la marque.',
+                details: 'La marque existe déjà avec un nom similaire (insensible à la casse).',
+            });
+        }
         return res.status(500).json({
             error: 'Erreur lors de la mise à jour du véhicule',
             details: err instanceof Error ? err.message : 'Erreur inconnue',
@@ -306,11 +368,10 @@ exports.deleteVehicule = deleteVehicule;
 // GET DISTINCT MARQUES
 const getDistinctMarques = (_req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        const marques = yield prisma.vehicle.findMany({
-            distinct: ['marque'],
+        const marques = yield prisma.marque.findMany({
             select: {
                 id: true,
-                marque: true,
+                name: true,
             },
         });
         return res.json(marques);
@@ -406,17 +467,20 @@ const getParkingUserVehicles = (req, res) => __awaiter(void 0, void 0, void 0, f
                         dateDebut: true,
                         dateFin: true
                     }
-                }
+                },
+                marqueRef: true
             },
             orderBy: {
                 createdAt: 'desc'
             }
         });
-        // Calculer les statistiques agrégées basées sur le status des véhicules
+        // Calculer les statistiques agrégées
+        // Note: vendus et enLocation sont maintenant calculés dynamiquement via les reservations
+        const now = new Date();
         const stats = {
             total: vehicles.length,
-            vendus: vehicles.filter(v => v.status === 'ACHETE').length,
-            reserves: vehicles.filter(v => v.status === 'EN_LOCATION').length,
+            vendus: vehicles.filter(v => v.reservations.some(r => r.type === 'ACHAT' && (!r.dateFin || new Date(r.dateFin) > now))).length,
+            enLocation: vehicles.filter(v => v.reservations.some(r => r.type === 'LOCATION' && new Date(r.dateFin) > now)).length,
             disponibles: vehicles.filter(v => v.status === 'DISPONIBLE').length,
             enMaintenance: vehicles.filter(v => v.status === 'EN_MAINTENANCE').length,
             indisponibles: vehicles.filter(v => v.status === 'INDISPONIBLE').length,
@@ -431,7 +495,7 @@ const getParkingUserVehicles = (req, res) => __awaiter(void 0, void 0, void 0, f
                     vues: ((_a = vehicle.stats) === null || _a === void 0 ? void 0 : _a.vues) || 0,
                     reservations: ((_b = vehicle.stats) === null || _b === void 0 ? void 0 : _b.reservations) || 0,
                     favoris: vehicle.favorites.length,
-                    reservationsActives: vehicle.reservations.filter(r => new Date(r.dateFin) > new Date()).length
+                    reservationsActives: vehicle.reservations.filter(r => (r.dateFin ? new Date(r.dateFin) > now : true)).length
                 } }));
         });
         return res.json({
@@ -574,7 +638,8 @@ const getParkingUserVehicleById = (req, res) => __awaiter(void 0, void 0, void 0
                         createdAt: 'desc'
                     },
                     take: 10
-                }
+                },
+                marqueRef: true
             }
         });
         if (!vehicle) {
@@ -583,11 +648,12 @@ const getParkingUserVehicleById = (req, res) => __awaiter(void 0, void 0, void 0
             });
         }
         // Formater les statistiques détaillées
+        const now = new Date();
         const formattedVehicle = Object.assign(Object.assign({}, vehicle), { stats: {
                 vues: ((_a = vehicle.stats) === null || _a === void 0 ? void 0 : _a.vues) || 0,
                 reservations: ((_b = vehicle.stats) === null || _b === void 0 ? void 0 : _b.reservations) || 0,
                 favoris: vehicle.favorites.length,
-                reservationsActives: vehicle.reservations.filter(r => new Date(r.dateFin) > new Date()).length,
+                reservationsActives: vehicle.reservations.filter(r => (r.dateFin ? new Date(r.dateFin) > now : true)).length,
                 reservationsTotal: vehicle.reservations.length
             } });
         return res.json({
@@ -644,7 +710,7 @@ const getParkingManagementData = (req, res) => __awaiter(void 0, void 0, void 0,
         // Filtrer par recherche textuelle
         if (search) {
             where.OR = [
-                { marque: { contains: search, mode: 'insensitive' } },
+                { marqueRef: { name: { contains: search, mode: 'insensitive' } } },
                 { model: { contains: search, mode: 'insensitive' } },
                 { description: { contains: search, mode: 'insensitive' } }
             ];
@@ -686,7 +752,8 @@ const getParkingManagementData = (req, res) => __awaiter(void 0, void 0, void 0,
                     orderBy: {
                         dateDebut: 'asc'
                     }
-                }
+                },
+                marqueRef: true
             },
             orderBy: {
                 createdAt: 'desc'
@@ -712,11 +779,17 @@ const getParkingManagementData = (req, res) => __awaiter(void 0, void 0, void 0,
         // Calculer les statistiques globales
         const now = new Date();
         const activeReservations = vehicles.flatMap(v => v.reservations)
-            .filter(r => new Date(r.dateDebut) <= now && new Date(r.dateFin) >= now);
+            .filter(r => {
+            const dateDebut = r.dateDebut ? new Date(r.dateDebut) : null;
+            const dateFin = r.dateFin ? new Date(r.dateFin) : null;
+            return dateFin
+                ? dateDebut !== null && dateDebut <= now && dateFin >= now
+                : dateDebut !== null && dateDebut <= now;
+        });
         const stats = {
             total: vehicles.length,
-            vendus: vehicles.filter(v => v.status === 'ACHETE').length,
-            enLocation: vehicles.filter(v => v.status === 'EN_LOCATION').length,
+            vendus: vehicles.filter(v => v.reservations.some(r => r.type === 'ACHAT' && (!r.dateFin || new Date(r.dateFin) > now))).length,
+            enLocation: vehicles.filter(v => v.reservations.some(r => r.type === 'LOCATION' && (r.dateFin && new Date(r.dateFin) > now))).length,
             disponibles: vehicles.filter(v => v.status === 'DISPONIBLE').length,
             enMaintenance: vehicles.filter(v => v.status === 'EN_MAINTENANCE').length,
             indisponibles: vehicles.filter(v => v.status === 'INDISPONIBLE').length,
@@ -724,27 +797,35 @@ const getParkingManagementData = (req, res) => __awaiter(void 0, void 0, void 0,
             totalReservations: vehicles.reduce((sum, vehicle) => { var _a; return sum + (((_a = vehicle.stats) === null || _a === void 0 ? void 0 : _a.reservations) || 0); }, 0),
             totalFavoris: vehicles.reduce((sum, vehicle) => sum + vehicle.favorites.length, 0),
             reservationsActives: activeReservations.length,
-            monthlySales: monthlyReservations.filter(r => r.type === 'ACHAT').reduce((sum, r) => sum + r._count.id, 0),
-            monthlyRentals: monthlyReservations.filter(r => r.type === 'LOCATION').reduce((sum, r) => sum + r._count.id, 0)
+            monthlySales: monthlyReservations.filter(r => r.type === 'ACHAT').reduce((sum, r) => { var _a; return sum + (((_a = r._count) === null || _a === void 0 ? void 0 : _a.id) || 0); }, 0),
+            monthlyRentals: monthlyReservations.filter(r => r.type === 'LOCATION').reduce((sum, r) => { var _a; return sum + (((_a = r._count) === null || _a === void 0 ? void 0 : _a.id) || 0); }, 0)
         };
         // Préparer les données pour les graphiques
         const monthlyData = prepareMonthlyChartData(monthlyReservations);
         // Formater les véhicules pour l'affichage
         const formattedVehicles = vehicles.map(vehicle => {
-            var _a, _b;
+            var _a, _b, _c;
             return ({
                 id: vehicle.id,
-                marque: vehicle.marque,
+                marque: (_a = vehicle.marqueRef) === null || _a === void 0 ? void 0 : _a.name,
                 model: vehicle.model,
                 prix: vehicle.prix,
                 status: vehicle.status,
                 photos: vehicle.photos,
                 createdAt: vehicle.createdAt,
+                forSale: vehicle.forSale,
+                forRent: vehicle.forRent,
                 stats: {
-                    vues: ((_a = vehicle.stats) === null || _a === void 0 ? void 0 : _a.vues) || 0,
-                    reservations: ((_b = vehicle.stats) === null || _b === void 0 ? void 0 : _b.reservations) || 0,
+                    vues: ((_b = vehicle.stats) === null || _b === void 0 ? void 0 : _b.vues) || 0,
+                    reservations: ((_c = vehicle.stats) === null || _c === void 0 ? void 0 : _c.reservations) || 0,
                     favoris: vehicle.favorites.length,
-                    reservationsActives: vehicle.reservations.filter(r => new Date(r.dateDebut) <= now && new Date(r.dateFin) >= now).length
+                    reservationsActives: vehicle.reservations.filter(r => {
+                        const dateDebut = r.dateDebut ? new Date(r.dateDebut) : null;
+                        const dateFin = r.dateFin ? new Date(r.dateFin) : null;
+                        return dateDebut !== null && (dateFin
+                            ? dateDebut <= now && dateFin >= now
+                            : dateDebut <= now);
+                    }).length
                 },
                 nextReservation: vehicle.reservations[0] ? {
                     type: vehicle.reservations[0].type,
@@ -767,10 +848,8 @@ const getParkingManagementData = (req, res) => __awaiter(void 0, void 0, void 0,
             charts: {
                 monthlyData,
                 statusDistribution: {
-                    labels: ['Vendus', 'En location', 'Disponibles', 'Maintenance', 'Indisponibles'],
+                    labels: ['Disponibles', 'Maintenance', 'Indisponibles'],
                     data: [
-                        stats.vendus,
-                        stats.enLocation,
                         stats.disponibles,
                         stats.enMaintenance,
                         stats.indisponibles
@@ -799,15 +878,16 @@ function prepareMonthlyChartData(monthlyReservations) {
     const salesData = Array(6).fill(0);
     const rentalData = Array(6).fill(0);
     monthlyReservations.forEach(item => {
+        var _a, _b;
         const reservationDate = new Date(item.createdAt);
         const monthDiff = now.getMonth() - reservationDate.getMonth();
         if (monthDiff >= 0 && monthDiff < 6) {
             const index = 5 - monthDiff;
             if (item.type === 'ACHAT') {
-                salesData[index] += item._count.id;
+                salesData[index] += (((_a = item._count) === null || _a === void 0 ? void 0 : _a.id) || 0);
             }
             else if (item.type === 'LOCATION') {
-                rentalData[index] += item._count.id;
+                rentalData[index] += (((_b = item._count) === null || _b === void 0 ? void 0 : _b.id) || 0);
             }
         }
     });
