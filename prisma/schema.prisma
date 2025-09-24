@@ -14,8 +14,8 @@ model User {
   role                 Role      @default(CLIENT)
   image                String?   // URL de l'image de profil, optionnelle
   address              String?
-  nom                  String    @default("Inconnu") // Valeur par défaut
-  prenom               String    @default("Inconnu")
+  nom                  String   
+  prenom               String
   password             String
   refreshToken         String?
   emailVerified        Boolean   @default(false)
@@ -66,38 +66,39 @@ model Parking {
 }
 
 model Vehicle {
-  id                   Int       @id @default(autoincrement())
-  userOwnerId         Int?      // Lien vers un client (si role = CLIENT)
-  parkingId           Int?      // Lien vers un parking
-  userOwner   User? @relation("ClientVehicles", fields: [userOwnerId], references: [id])
-  parking             Parking?  @relation("ParkingVehicles", fields: [parkingId], references: [id])
-  
-  marque              String
-  model               String    // Modèle du véhicule (ex: Clio, D10)
-  prix                Float
-  description         String
-  photos              String[]
-  garantie            Boolean   @default(false)
-  dureeGarantie       Int?
-  documents           String[]  // URLs des documents généraux
-  chauffeur           Boolean   @default(false)
-  assurance           Boolean   @default(false)
-  dureeAssurance      Int?      // Durée de validité de l'assurance en mois
-  carteGrise          Boolean   @default(false)
-  vignette            Boolean   @default(false) 
-  status              VehicleStatus @default(DISPONIBLE)
-  createdAt           DateTime  @default(now())
-  updatedAt           DateTime  @updatedAt
-  fuelType            FuelType  // Type de carburant (essence, diesel, etc.)
-  mileage             Int?      // Kilométrage du véhicule
-
-  reservations        Reservation[]
-  stats               VehicleStats?
-  history             VehicleHistory[]
-  favorites           Favorite[]
-
-  @@index([userOwnerId])
-  @@index([parkingId])
+id                   Int       @id @default(autoincrement())
+userOwnerId         Int?      // Lien vers un client (si role = CLIENT)
+parkingId           Int?      // Lien vers un parking
+userOwner   User? @relation("ClientVehicles", fields: [userOwnerId], references: [id])
+parking             Parking?  @relation("ParkingVehicles", fields: [parkingId], references: [id])
+marqueRef   Marque  @relation(fields: [marqueId], references: [id])
+marqueId    Int
+model               String    // Modèle du véhicule (ex: Clio, D10)
+year                Int?
+prix                Float
+description         String
+photos              String[]
+garantie            Boolean   @default(false)
+dureeGarantie       Int?
+documents           String[]  // URLs des documents généraux
+chauffeur           Boolean   @default(false)
+assurance           Boolean   @default(false)
+dureeAssurance      Int?      // Durée de validité de l'assurance en mois
+carteGrise          Boolean   @default(false)
+vignette            Boolean   @default(false)
+forSale             Boolean   @default(true)
+forRent             Boolean   @default(true)
+status              VehicleStatus @default(DISPONIBLE)
+createdAt           DateTime  @default(now())
+updatedAt           DateTime  @updatedAt
+fuelType            FuelType  // Type de carburant (essence, diesel, etc.)
+mileage             Int?      // Kilométrage du véhicule
+reservations        Reservation[]
+stats               VehicleStats?
+history             VehicleHistory[]
+favorites           Favorite[]
+@@index([userOwnerId])
+@@index([parkingId])
 }
 
 model Reservation {
@@ -106,8 +107,8 @@ model Reservation {
   vehicleId            Int
   user                 User      @relation(fields: [userId], references: [id])
   vehicle              Vehicle   @relation(fields: [vehicleId], references: [id])
-  dateDebut            DateTime
-  dateFin              DateTime
+  dateDebut            DateTime?
+  dateFin              DateTime?
   type                 ReservationType
   commission           Float?
   createdAt            DateTime  @default(now())
@@ -133,7 +134,16 @@ model VehicleStats {
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 }
-
+model Marque {
+  id          Int      @id @default(autoincrement())
+  name        String   @unique
+  logoUrl     String?
+  isCustom    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  vehicles    Vehicle[]
+  @@index([name])
+}
 model VehicleHistory {
   id                   Int      @id @default(autoincrement())
   vehicleId            Int
@@ -189,11 +199,9 @@ enum ReservationType {
 }
 
 enum VehicleStatus {
-  DISPONIBLE
-  EN_LOCATION
-  ACHETE
-  EN_MAINTENANCE
-  INDISPONIBLE  // Nouveau statut ajouté
+DISPONIBLE
+EN_MAINTENANCE
+INDISPONIBLE
 }
 
 enum FuelType {
