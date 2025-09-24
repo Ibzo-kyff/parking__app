@@ -6,6 +6,7 @@ import vehiculeRoutes from './routes/vehiculeRoutes';
 import parkingRoutes from './routes/parkingRoutes';
 import reservationRoutes from './routes/reservationRoute';
 import notificationRoutes from './routes/notificationRoute';
+import marqueRoutes from './routes/marqueRoutes';
 
 const app = express();
 const prisma = new PrismaClient();
@@ -19,6 +20,7 @@ app.use('/api/vehicules', vehiculeRoutes);
 app.use('/api/parkings', parkingRoutes);
 app.use('/api/reservations', reservationRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/marques', marqueRoutes);
 
 // Middleware global d'erreurs (Multer + génériques)
 app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
