@@ -8,170 +8,181 @@ datasource db {
 }
 
 model User {
-  id                   Int       @id @default(autoincrement())
-  email                String    @unique
-  phone                String   @unique
-  role                 Role      @default(CLIENT)
-  image                String?   // URL de l'image de profil, optionnelle
-  address              String?
-  nom                  String   
-  prenom               String
-  password             String
-  refreshToken         String?
-  emailVerified        Boolean   @default(false)
-  verificationToken    String?
+  id                       Int       @id @default(autoincrement())
+  email                    String    @unique
+  phone                    String    @unique
+  role                     Role      @default(CLIENT)
+  image                    String? // URL de l'image de profil, optionnelle
+  address                  String?
+  nom                      String
+  prenom                   String
+  password                 String
+  refreshToken             String?
+  emailVerified            Boolean   @default(false)
+  verificationToken        String?
   verificationTokenExpires DateTime?
-  passwordResetToken   String?
-  passwordResetExpires DateTime?
-  passwordResetOTP      String?  
-  passwordResetOTPExpires DateTime? 
-  emailVerifyOTP        String?   
-  emailVerifyOTPExpires DateTime? 
-  status               Status   @default(PENDING) // Utilisé uniquement pour PARKING ou ADMIN
-  createdAt            DateTime  @default(now())
-  updatedAt            DateTime  @updatedAt
+  passwordResetToken       String?
+  passwordResetExpires     DateTime?
+  passwordResetOTP         String?
+  passwordResetOTPExpires  DateTime?
+  emailVerifyOTP           String?
+  emailVerifyOTPExpires    DateTime?
+  status                   Status    @default(PENDING) // Utilisé uniquement pour PARKING ou ADMIN
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
 
-  vehicles             Vehicle[] @relation("ClientVehicles")
-  reservations         Reservation[]
-  messagesSent         Message[] @relation("SentMessages")
-  messagesReceived     Message[] @relation("ReceivedMessages")
-  favorites            Favorite[]
-  notifications        Notification[] @relation("UserNotifications")
+  vehicles         Vehicle[]      @relation("ClientVehicles")
+  reservations     Reservation[]
+  messagesSent     Message[]      @relation("SentMessages")
+  messagesReceived Message[]      @relation("ReceivedMessages")
+  favorites        Favorite[]
+  notifications    Notification[] @relation("UserNotifications")
 
-  parking              Parking?  @relation("ParkingManager") // Relation nommée pour clarté
+  parking Parking? @relation("ParkingManager") // Relation nommée pour clarté
 
   @@unique([verificationToken])
   @@unique([passwordResetToken])
 }
 
 model Parking {
-  id                   Int       @id @default(autoincrement())
-  userId               Int       @unique
-  user                 User      @relation("ParkingManager", fields: [userId], references: [id])
-  name                 String
-  address              String
-  phone                String?   // Numéro spécifique au parking (optionnel)
-  description          String?
-  capacity             Int
-  hoursOfOperation     String?   // Exemple : "08:00 - 18:00"
-  status               ParkingStatus @default(ACTIVE)
-  createdAt            DateTime  @default(now())
-  updatedAt            DateTime  @updatedAt
-  logo                 String?   // URL du logo/image du parking
-  city                 String    // Ville du parking
-  email                String    // Email spécifique du parking
-
-  notifications        Notification[] @relation("ParkingNotifications")
-  vehicles             Vehicle[] @relation("ParkingVehicles")
+  id               Int            @id @default(autoincrement())
+  userId           Int            @unique
+  user             User           @relation("ParkingManager", fields: [userId], references: [id])
+  name             String
+  address          String
+  phone            String? // Numéro spécifique au parking (optionnel)
+  description      String?
+  capacity         Int
+  hoursOfOperation String? // Exemple : "08:00 - 18:00"
+  status           ParkingStatus  @default(ACTIVE)
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  logo             String? // URL du logo/image du parking
+  city             String // Ville du parking
+  email            String // Email spécifique du parking
+  messages         Message[]
+  notifications    Notification[] @relation("ParkingNotifications")
+  vehicles         Vehicle[]      @relation("ParkingVehicles")
 }
 
 model Vehicle {
-id                   Int       @id @default(autoincrement())
-userOwnerId         Int?      // Lien vers un client (si role = CLIENT)
-parkingId           Int?      // Lien vers un parking
-userOwner   User? @relation("ClientVehicles", fields: [userOwnerId], references: [id])
-parking             Parking?  @relation("ParkingVehicles", fields: [parkingId], references: [id])
-marqueRef   Marque  @relation(fields: [marqueId], references: [id])
-marqueId    Int
-model               String    // Modèle du véhicule (ex: Clio, D10)
-year                Int?
-prix                Float
-description         String
-photos              String[]
-garantie            Boolean   @default(false)
-dureeGarantie       Int?
-documents           String[]  // URLs des documents généraux
-chauffeur           Boolean   @default(false)
-assurance           Boolean   @default(false)
-dureeAssurance      Int?      // Durée de validité de l'assurance en mois
-carteGrise          Boolean   @default(false)
-vignette            Boolean   @default(false)
-forSale             Boolean   @default(true)
-forRent             Boolean   @default(true)
-status              VehicleStatus @default(DISPONIBLE)
-createdAt           DateTime  @default(now())
-updatedAt           DateTime  @updatedAt
-fuelType            FuelType  // Type de carburant (essence, diesel, etc.)
-mileage             Int?      // Kilométrage du véhicule
-reservations        Reservation[]
-stats               VehicleStats?
-history             VehicleHistory[]
-favorites           Favorite[]
-@@index([userOwnerId])
-@@index([parkingId])
+  id             Int              @id @default(autoincrement())
+  userOwnerId    Int? // Lien vers un client (si role = CLIENT)
+  parkingId      Int? // Lien vers un parking
+  userOwner      User?            @relation("ClientVehicles", fields: [userOwnerId], references: [id])
+  parking        Parking?         @relation("ParkingVehicles", fields: [parkingId], references: [id])
+  marqueRef      Marque           @relation(fields: [marqueId], references: [id])
+  marqueId       Int
+  model          String // Modèle du véhicule (ex: Clio, D10)
+  year           Int?
+  prix           Float
+  description    String
+  photos         String[]
+  garantie       Boolean          @default(false)
+  dureeGarantie  Int?
+  documents      String[] // URLs des documents généraux
+  chauffeur      Boolean          @default(false)
+  assurance      Boolean          @default(false)
+  dureeAssurance Int? // Durée de validité de l'assurance en mois
+  carteGrise     Boolean          @default(false)
+  vignette       Boolean          @default(false)
+  forSale        Boolean          @default(true)
+  forRent        Boolean          @default(true)
+  status         VehicleStatus    @default(DISPONIBLE)
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  fuelType       FuelType // Type de carburant (essence, diesel, etc.)
+  mileage        Int? // Kilométrage du véhicule
+  reservations   Reservation[]
+  stats          VehicleStats?
+  history        VehicleHistory[]
+  favorites      Favorite[]
+
+  @@index([userOwnerId])
+  @@index([parkingId])
 }
 
 model Reservation {
-  id                   Int       @id @default(autoincrement())
-  userId               Int
-  vehicleId            Int
-  user                 User      @relation(fields: [userId], references: [id])
-  vehicle              Vehicle   @relation(fields: [vehicleId], references: [id])
-  dateDebut            DateTime?
-  dateFin              DateTime?
-  type                 ReservationType
-  commission           Float?
-  createdAt            DateTime  @default(now())
-  updatedAt            DateTime  @updatedAt
+  id         Int             @id @default(autoincrement())
+  userId     Int
+  vehicleId  Int
+  user       User            @relation(fields: [userId], references: [id])
+  vehicle    Vehicle         @relation(fields: [vehicleId], references: [id])
+  dateDebut  DateTime?
+  dateFin    DateTime?
+  type       ReservationType
+  commission Float?
+  createdAt  DateTime        @default(now())
+  updatedAt  DateTime        @updatedAt
 }
 
 model Message {
-  id                   Int      @id @default(autoincrement())
-  senderId             Int
-  receiverId           Int
-  sender               User     @relation("SentMessages", fields: [senderId], references: [id])
-  receiver             User     @relation("ReceivedMessages", fields: [receiverId], references: [id])
-  content              String
-  createdAt            DateTime @default(now())
+  id         Int      @id @default(autoincrement())
+  content    String
+  senderId   Int
+  receiverId Int
+  parkingId  Int? // 🏢 Nouveau champ pour les conversations de parking
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  sender   User     @relation("SentMessages", fields: [senderId], references: [id])
+  receiver User     @relation("ReceivedMessages", fields: [receiverId], references: [id])
+  parking  Parking? @relation(fields: [parkingId], references: [id])
+  read       Boolean  @default(false) // Vérifier que ce champ existe
+  @@map("messages")
 }
 
 model VehicleStats {
-  id                   Int      @id @default(autoincrement())
-  vehicleId            Int      @unique
-  vehicle              Vehicle  @relation(fields: [vehicleId], references: [id])
-  vues                 Int      @default(0)
-  reservations         Int      @default(0)
-  createdAt            DateTime @default(now())
-  updatedAt            DateTime @updatedAt
+  id           Int      @id @default(autoincrement())
+  vehicleId    Int      @unique
+  vehicle      Vehicle  @relation(fields: [vehicleId], references: [id])
+  vues         Int      @default(0)
+  reservations Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 }
+
 model Marque {
-  id          Int      @id @default(autoincrement())
-  name        String   @unique
-  logoUrl     String?
-  isCustom    Boolean  @default(false)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  vehicles    Vehicle[]
+  id        Int       @id @default(autoincrement())
+  name      String    @unique
+  logoUrl   String?
+  isCustom  Boolean   @default(false)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  vehicles  Vehicle[]
+
   @@index([name])
 }
-model VehicleHistory {
-  id                   Int      @id @default(autoincrement())
-  vehicleId            Int
-  vehicle              Vehicle  @relation(fields: [vehicleId], references: [id])
-  changes              String
-  createdAt            DateTime @default(now())
-}
-model Notification {
-  id                   Int            @id @default(autoincrement())
-  userId               Int?           // Pour les notifications utilisateur
-  parkingId            Int?           // Pour les notifications parking
-  title                String
-  message              String
-  type                 NotificationType
-  read                 Boolean        @default(false)
-  createdAt            DateTime       @default(now())
 
-  user                 User?          @relation("UserNotifications", fields: [userId], references: [id])
-  parking              Parking?       @relation("ParkingNotifications", fields: [parkingId], references: [id])
+model VehicleHistory {
+  id        Int      @id @default(autoincrement())
+  vehicleId Int
+  vehicle   Vehicle  @relation(fields: [vehicleId], references: [id])
+  changes   String
+  createdAt DateTime @default(now())
+}
+
+model Notification {
+  id        Int              @id @default(autoincrement())
+  userId    Int? // Pour les notifications utilisateur
+  parkingId Int? // Pour les notifications parking
+  title     String
+  message   String
+  type      NotificationType
+  read      Boolean          @default(false)
+  createdAt DateTime         @default(now())
+
+  user    User?    @relation("UserNotifications", fields: [userId], references: [id])
+  parking Parking? @relation("ParkingNotifications", fields: [parkingId], references: [id])
 }
 
 model Favorite {
-  id                   Int      @id @default(autoincrement())
-  userId               Int
-  vehicleId            Int
-  user                 User     @relation(fields: [userId], references: [id])
-  vehicle              Vehicle  @relation(fields: [vehicleId], references: [id])
-  createdAt            DateTime @default(now())
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  vehicleId Int
+  user      User     @relation(fields: [userId], references: [id])
+  vehicle   Vehicle  @relation(fields: [vehicleId], references: [id])
+  createdAt DateTime @default(now())
 
   @@unique([userId, vehicleId])
 }
@@ -199,9 +210,9 @@ enum ReservationType {
 }
 
 enum VehicleStatus {
-DISPONIBLE
-EN_MAINTENANCE
-INDISPONIBLE
+  DISPONIBLE
+  EN_MAINTENANCE
+  INDISPONIBLE
 }
 
 enum FuelType {
