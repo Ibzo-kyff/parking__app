@@ -60,7 +60,7 @@ model Parking {
   logo                 String?   // URL du logo/image du parking
   city                 String    // Ville du parking
   email                String    // Email spécifique du parking
-
+  messages            Message[]
   notifications        Notification[] @relation("ParkingNotifications")
   vehicles             Vehicle[] @relation("ParkingVehicles")
 }
@@ -122,7 +122,11 @@ model Message {
   sender               User     @relation("SentMessages", fields: [senderId], references: [id])
   receiver             User     @relation("ReceivedMessages", fields: [receiverId], references: [id])
   content              String
+  read                 Boolean  @default(false)
   createdAt            DateTime @default(now())
+  deletedAt            DateTime?
+  parkingId            Int?
+  parking              Parking? @relation(fields: [parkingId], references: [id])
 }
 
 model VehicleStats {

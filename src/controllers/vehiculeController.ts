@@ -923,7 +923,7 @@ export const getParkingManagementData = async (req: AuthRequest, res: Response) 
     // Formater les véhicules pour l'affichage
     const formattedVehicles = vehicles.map(vehicle => ({
       id: vehicle.id,
-      marque: vehicle.marqueRef?.name,
+      marque: vehicle.marqueRef?.name || '', 
       model: vehicle.model,
       prix: vehicle.prix,
       status: vehicle.status,
@@ -931,20 +931,24 @@ export const getParkingManagementData = async (req: AuthRequest, res: Response) 
       createdAt: vehicle.createdAt,
       forSale: vehicle.forSale,
       forRent: vehicle.forRent,
+      marqueRef: vehicle.marqueRef ? { 
+        id: vehicle.marqueRef.id,
+        name: vehicle.marqueRef.name,
+        logoUrl: vehicle.marqueRef.logoUrl || null,
+      } : null,
       stats: {
         vues: vehicle.stats?.vues || 0,
         reservations: vehicle.stats?.reservations || 0,
         favoris: vehicle.favorites.length,
         reservationsActives: vehicle.reservations.filter(r => {
-        const dateDebut = r.dateDebut ? new Date(r.dateDebut) : null;
-        const dateFin = r.dateFin ? new Date(r.dateFin) : null;
-
-        return dateDebut !== null && (
-          dateFin
-            ? dateDebut <= now && dateFin >= now
-            : dateDebut <= now
-        );
-      }).length
+          const dateDebut = r.dateDebut ? new Date(r.dateDebut) : null;
+          const dateFin = r.dateFin ? new Date(r.dateFin) : null;
+          return dateDebut !== null && (
+            dateFin
+              ? dateDebut <= now && dateFin >= now
+              : dateDebut <= now
+          );
+        }).length
       },
       nextReservation: vehicle.reservations[0] ? {
         type: vehicle.reservations[0].type,
