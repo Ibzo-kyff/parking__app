@@ -807,7 +807,7 @@ const getParkingManagementData = (req, res) => __awaiter(void 0, void 0, void 0,
             var _a, _b, _c;
             return ({
                 id: vehicle.id,
-                marque: (_a = vehicle.marqueRef) === null || _a === void 0 ? void 0 : _a.name,
+                marque: ((_a = vehicle.marqueRef) === null || _a === void 0 ? void 0 : _a.name) || '',
                 model: vehicle.model,
                 prix: vehicle.prix,
                 status: vehicle.status,
@@ -815,6 +815,11 @@ const getParkingManagementData = (req, res) => __awaiter(void 0, void 0, void 0,
                 createdAt: vehicle.createdAt,
                 forSale: vehicle.forSale,
                 forRent: vehicle.forRent,
+                marqueRef: vehicle.marqueRef ? {
+                    id: vehicle.marqueRef.id,
+                    name: vehicle.marqueRef.name,
+                    logoUrl: vehicle.marqueRef.logoUrl || null,
+                } : null,
                 stats: {
                     vues: ((_b = vehicle.stats) === null || _b === void 0 ? void 0 : _b.vues) || 0,
                     reservations: ((_c = vehicle.stats) === null || _c === void 0 ? void 0 : _c.reservations) || 0,

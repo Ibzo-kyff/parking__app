@@ -12,6 +12,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.pusher = void 0;
 const express_1 = __importDefault(require("express"));
 const authRoutes_1 = __importDefault(require("./routes/authRoutes"));
 const client_1 = require("@prisma/client");
@@ -21,8 +22,18 @@ const parkingRoutes_1 = __importDefault(require("./routes/parkingRoutes"));
 const reservationRoute_1 = __importDefault(require("./routes/reservationRoute"));
 const notificationRoute_1 = __importDefault(require("./routes/notificationRoute"));
 const marqueRoutes_1 = __importDefault(require("./routes/marqueRoutes"));
+const messageRoutes_1 = __importDefault(require("./routes/messageRoutes"));
+const pusher_1 = __importDefault(require("pusher"));
 const app = (0, express_1.default)();
 const prisma = new client_1.PrismaClient();
+// Initialisation de Pusher
+exports.pusher = new pusher_1.default({
+    appId: process.env.PUSHER_APP_ID,
+    key: process.env.PUSHER_KEY,
+    secret: process.env.PUSHER_SECRET,
+    cluster: process.env.PUSHER_CLUSTER,
+    useTLS: true,
+});
 app.use(express_1.default.json());
 app.use((0, cookie_parser_1.default)());
 // Routes
@@ -32,12 +43,13 @@ app.use('/api/parkings', parkingRoutes_1.default);
 app.use('/api/reservations', reservationRoute_1.default);
 app.use('/api/notifications', notificationRoute_1.default);
 app.use('/api/marques', marqueRoutes_1.default);
-// Middleware global d'erreurs (Multer + génériques)
+app.use('/api/messages', messageRoutes_1.default);
+// Middleware global d'erreurs
 app.use((err, _req, res, _next) => {
     if (err && typeof err === 'object' && 'name' in err && err.name === 'MulterError') {
         return res.status(400).json({
             error: err.message || 'Erreur upload',
-            hint: "Utilisez Body=form-data avec un champ 'image' ou 'photos' de type Fichier. Ne laissez pas le nom de champ vide."
+            hint: "Utilisez Body=form-data avec un champ 'image' ou 'photos' de type Fichier. Ne laissez pas le nom de champ vide.",
         });
     }
     if (err instanceof Error) {
@@ -57,3 +69,4 @@ app.listen(PORT, () => __awaiter(void 0, void 0, void 0, function* () {
         process.exit(1);
     }
 }));
+exports.default = app; // Export pour Vercel
