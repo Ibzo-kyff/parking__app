@@ -9,10 +9,57 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getParkingManagementData = exports.getParkingUserVehicleById = exports.getParkingStats = exports.getParkingUserVehicles = exports.getRecentParkings = exports.getDistinctModels = exports.getDistinctMarques = exports.deleteVehicule = exports.updateVehicule = exports.getVehiculeById = exports.getAllVehicules = exports.createVehicule = void 0;
+exports.addVehicleView = exports.getParkingManagementData = exports.getParkingUserVehicleById = exports.getParkingStats = exports.getParkingUserVehicles = exports.getRecentParkings = exports.getDistinctModels = exports.getDistinctMarques = exports.deleteVehicule = exports.getVehiculeById = exports.getAllVehicules = exports.updateVehicule = exports.createVehicule = void 0;
 const client_1 = require("@prisma/client");
 const blob_1 = require("@vercel/blob");
 const prisma = new client_1.PrismaClient();
+// Fonction utilitaire pour normaliser et gérer les marques
+const findOrCreateMarque = (marqueName) => __awaiter(void 0, void 0, void 0, function* () {
+    if (!marqueName || typeof marqueName !== 'string' || marqueName.trim() === '') {
+        throw new Error('Le nom de la marque est invalide');
+    }
+    // Normalisation plus robuste
+    const normalizedMarque = marqueName
+        .toLowerCase()
+        .trim()
+        .replace(/\s+/g, ' ') // Remplacer les espaces multiples par un seul
+        .normalize('NFD') // Normaliser les caractères accentués
+        .replace(/[\u0300-\u036f]/g, ''); // Supprimer les diacritiques
+    // Recherche avec différentes variantes pour éviter les doublons
+    const existingMarque = yield prisma.marque.findFirst({
+        where: {
+            OR: [
+                { name: normalizedMarque },
+                { name: { equals: marqueName, mode: 'insensitive' } },
+                { name: { equals: normalizedMarque, mode: 'insensitive' } }
+            ]
+        }
+    });
+    if (existingMarque) {
+        return existingMarque;
+    }
+    // Création avec vérification de conflit
+    try {
+        const newMarque = yield prisma.marque.create({
+            data: {
+                name: normalizedMarque
+            },
+        });
+        return newMarque;
+    }
+    catch (error) {
+        // En cas de conflit (doublon détecté par la base de données), on refait une recherche
+        if (error.code === 'P2002') {
+            const marque = yield prisma.marque.findUnique({
+                where: { name: normalizedMarque }
+            });
+            if (marque) {
+                return marque;
+            }
+        }
+        throw error;
+    }
+});
 // CREATE VEHICULE
 const createVehicule = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a;
@@ -57,13 +104,15 @@ const createVehicule = (req, res) => __awaiter(void 0, void 0, void 0, function*
             return res.status(400).json({ error: "La durée d'assurance est obligatoire si l'assurance est activée." });
         }
         const parsedMileage = mileage ? Number(mileage) : null;
-        // Gérer la marque (trouver ou créer, avec normalisation)
-        let marqueEntity = yield prisma.marque.findUnique({
-            where: { name: marque.toLowerCase() }, // Normalisation en minuscules pour éviter les doublons
-        });
-        if (!marqueEntity) {
-            marqueEntity = yield prisma.marque.create({
-                data: { name: marque.toLowerCase() }, // Créer avec nom normalisé
+        // Gérer la marque avec la fonction utilitaire
+        let marqueEntity;
+        try {
+            marqueEntity = yield findOrCreateMarque(marque);
+        }
+        catch (error) {
+            return res.status(400).json({
+                error: 'Erreur lors de la gestion de la marque',
+                details: error.message
             });
         }
         // Uploader les photos vers Vercel Blob
@@ -113,6 +162,122 @@ const createVehicule = (req, res) => __awaiter(void 0, void 0, void 0, function*
     }
 });
 exports.createVehicule = createVehicule;
+// UPDATE VEHICULE
+const updateVehicule = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
+    const { id } = req.params;
+    const { marque, model, year, prix, description, garantie, dureeGarantie, chauffeur, assurance, dureeAssurance, carteGrise, vignette, fuelType, mileage, status, forSale, forRent, } = req.body;
+    try {
+        // Vérifier si le véhicule existe
+        const vehicule = yield prisma.vehicle.findUnique({ where: { id: parseInt(id) } });
+        if (!vehicule) {
+            return res.status(404).json({ error: 'Véhicule non trouvé' });
+        }
+        // Valider les champs numériques si fournis
+        const parsedPrix = prix ? Number(prix) : undefined;
+        if (prix && parsedPrix !== undefined && isNaN(parsedPrix)) {
+            return res.status(400).json({ error: 'Le prix doit être un nombre valide.' });
+        }
+        const parsedYear = year ? Number(year) : undefined;
+        if (year && parsedYear !== undefined && isNaN(parsedYear)) {
+            return res.status(400).json({ error: "L'année doit être un nombre valide." });
+        }
+        const parsedDureeGarantie = dureeGarantie ? Number(dureeGarantie) : undefined;
+        if (garantie === 'true' && parsedDureeGarantie == null) {
+            return res.status(400).json({ error: 'La durée de garantie est obligatoire si la garantie est activée.' });
+        }
+        const parsedDureeAssurance = dureeAssurance ? Number(dureeAssurance) : undefined;
+        if (assurance === 'true' && parsedDureeAssurance == null) {
+            return res.status(400).json({ error: "La durée d'assurance est obligatoire si l'assurance est activée." });
+        }
+        const parsedMileage = mileage ? Number(mileage) : undefined;
+        // Gérer la marque si fournie avec la fonction utilitaire
+        let marqueId = undefined;
+        if (marque) {
+            if (typeof marque !== 'string' || marque.trim() === '') {
+                return res.status(400).json({ error: 'La marque doit être une chaîne de caractères non vide.' });
+            }
+            try {
+                const marqueEntity = yield findOrCreateMarque(marque);
+                marqueId = marqueEntity.id;
+            }
+            catch (error) {
+                return res.status(400).json({
+                    error: 'Erreur lors de la gestion de la marque',
+                    details: error.message
+                });
+            }
+        }
+        // Gérer les booléens forSale et forRent si fournis
+        const parsedForSale = forSale !== undefined ? forSale === 'true' : undefined;
+        const parsedForRent = forRent !== undefined ? forRent === 'true' : undefined;
+        // Gérer les nouvelles photos
+        let photos = vehicule.photos; // Garder les photos existantes par défaut
+        const files = req.files;
+        if (files && files.length > 0) {
+            // Supprimer les anciens blobs si existants
+            if (photos && photos.length > 0) {
+                for (const photo of photos) {
+                    try {
+                        const url = new URL(photo);
+                        yield (0, blob_1.del)(url.pathname.slice(1));
+                    }
+                    catch (error) {
+                        console.warn(`Ancien blob non supprimé, URL invalide : ${photo}`);
+                    }
+                }
+            }
+            // Uploader les nouvelles photos
+            photos = [];
+            for (const file of files) {
+                const newFilename = `vehicles/${Date.now()}-${Math.round(Math.random() * 1e9)}${file.originalname ? (_a = file.originalname.match(/\.[0-9a-z]+$/i)) === null || _a === void 0 ? void 0 : _a[0] : '.jpg'}`;
+                const result = yield (0, blob_1.put)(newFilename, file.buffer, {
+                    access: 'public',
+                    token: process.env.BLOB_READ_WRITE_TOKEN,
+                });
+                photos.push(result.url);
+            }
+        }
+        const updatedVehicule = yield prisma.vehicle.update({
+            where: { id: parseInt(id) },
+            data: {
+                marqueId: marqueId !== undefined ? marqueId : vehicule.marqueId,
+                model,
+                year: parsedYear,
+                prix: parsedPrix,
+                description,
+                fuelType,
+                mileage: parsedMileage,
+                garantie: garantie === 'true' ? true : garantie === 'false' ? false : undefined,
+                dureeGarantie: parsedDureeGarantie,
+                chauffeur: chauffeur === 'true' ? true : chauffeur === 'false' ? false : undefined,
+                assurance: assurance === 'true' ? true : assurance === 'false' ? false : undefined,
+                dureeAssurance: parsedDureeAssurance,
+                carteGrise: carteGrise === 'true' ? true : carteGrise === 'false' ? false : undefined,
+                vignette: vignette === 'true' ? true : vignette === 'false' ? false : undefined,
+                forSale: parsedForSale,
+                forRent: parsedForRent,
+                status,
+                photos,
+            },
+        });
+        return res.json({ message: 'Véhicule mis à jour', vehicule: updatedVehicule });
+    }
+    catch (err) {
+        console.error('Erreur lors de la mise à jour du véhicule :', err);
+        if (err.code === 'P2002') {
+            return res.status(400).json({
+                error: 'Un doublon a été détecté.',
+                details: 'La marque existe déjà avec un nom similaire.',
+            });
+        }
+        return res.status(500).json({
+            error: 'Erreur lors de la mise à jour du véhicule',
+            details: err instanceof Error ? err.message : 'Erreur inconnue',
+        });
+    }
+});
+exports.updateVehicule = updateVehicule;
 // GET ALL VEHICULES WITH FILTERS
 const getAllVehicules = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { marque, model, minPrix, maxPrix, fuelType, maxMileage, withChauffeur, withGarantie, parkingId, userOwnerId, status, forSale, forRent, } = req.query;
@@ -199,121 +364,6 @@ const getVehiculeById = (req, res) => __awaiter(void 0, void 0, void 0, function
     }
 });
 exports.getVehiculeById = getVehiculeById;
-// UPDATE VEHICULE
-const updateVehicule = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
-    const { id } = req.params;
-    const { marque, model, year, prix, description, garantie, dureeGarantie, chauffeur, assurance, dureeAssurance, carteGrise, vignette, fuelType, mileage, status, forSale, forRent, } = req.body;
-    try {
-        // Vérifier si le véhicule existe
-        const vehicule = yield prisma.vehicle.findUnique({ where: { id: parseInt(id) } });
-        if (!vehicule) {
-            return res.status(404).json({ error: 'Véhicule non trouvé' });
-        }
-        // Valider les champs numériques si fournis
-        const parsedPrix = prix ? Number(prix) : undefined;
-        if (prix && parsedPrix !== undefined && isNaN(parsedPrix)) {
-            return res.status(400).json({ error: 'Le prix doit être un nombre valide.' });
-        }
-        const parsedYear = year ? Number(year) : undefined;
-        if (year && parsedYear !== undefined && isNaN(parsedYear)) {
-            return res.status(400).json({ error: "L'année doit être un nombre valide." });
-        }
-        const parsedDureeGarantie = dureeGarantie ? Number(dureeGarantie) : undefined;
-        if (garantie === 'true' && parsedDureeGarantie == null) {
-            return res.status(400).json({ error: 'La durée de garantie est obligatoire si la garantie est activée.' });
-        }
-        const parsedDureeAssurance = dureeAssurance ? Number(dureeAssurance) : undefined;
-        if (assurance === 'true' && parsedDureeAssurance == null) {
-            return res.status(400).json({ error: "La durée d'assurance est obligatoire si l'assurance est activée." });
-        }
-        const parsedMileage = mileage ? Number(mileage) : undefined;
-        // Gérer la marque si fournie (trouver ou créer avec normalisation)
-        let marqueId = undefined;
-        if (marque) {
-            if (typeof marque !== 'string' || marque.trim() === '') {
-                return res.status(400).json({ error: 'La marque doit être une chaîne de caractères non vide.' });
-            }
-            let marqueEntity = yield prisma.marque.findUnique({
-                where: { name: marque.toLowerCase() }, // Normalisation en minuscules
-            });
-            if (!marqueEntity) {
-                marqueEntity = yield prisma.marque.create({
-                    data: { name: marque.toLowerCase() }, // Créer avec nom normalisé
-                });
-            }
-            marqueId = marqueEntity.id;
-        }
-        // Gérer les booléens forSale et forRent si fournis
-        const parsedForSale = forSale !== undefined ? forSale === 'true' : undefined;
-        const parsedForRent = forRent !== undefined ? forRent === 'true' : undefined;
-        // Gérer les nouvelles photos
-        let photos = vehicule.photos; // Garder les photos existantes par défaut
-        const files = req.files;
-        if (files && files.length > 0) {
-            // Supprimer les anciens blobs si existants
-            if (photos && photos.length > 0) {
-                for (const photo of photos) {
-                    try {
-                        const url = new URL(photo);
-                        yield (0, blob_1.del)(url.pathname.slice(1));
-                    }
-                    catch (error) {
-                        console.warn(`Ancien blob non supprimé, URL invalide : ${photo}`);
-                    }
-                }
-            }
-            // Uploader les nouvelles photos
-            photos = [];
-            for (const file of files) {
-                const newFilename = `vehicles/${Date.now()}-${Math.round(Math.random() * 1e9)}${file.originalname ? (_a = file.originalname.match(/\.[0-9a-z]+$/i)) === null || _a === void 0 ? void 0 : _a[0] : '.jpg'}`;
-                const result = yield (0, blob_1.put)(newFilename, file.buffer, {
-                    access: 'public',
-                    token: process.env.BLOB_READ_WRITE_TOKEN,
-                });
-                photos.push(result.url);
-            }
-        }
-        const updatedVehicule = yield prisma.vehicle.update({
-            where: { id: parseInt(id) },
-            data: {
-                marqueId: marqueId !== undefined ? marqueId : vehicule.marqueId,
-                model,
-                year: parsedYear,
-                prix: parsedPrix,
-                description,
-                fuelType,
-                mileage: parsedMileage,
-                garantie: garantie === 'true' ? true : garantie === 'false' ? false : undefined,
-                dureeGarantie: parsedDureeGarantie,
-                chauffeur: chauffeur === 'true' ? true : chauffeur === 'false' ? false : undefined,
-                assurance: assurance === 'true' ? true : assurance === 'false' ? false : undefined,
-                dureeAssurance: parsedDureeAssurance,
-                carteGrise: carteGrise === 'true' ? true : carteGrise === 'false' ? false : undefined,
-                vignette: vignette === 'true' ? true : vignette === 'false' ? false : undefined,
-                forSale: parsedForSale,
-                forRent: parsedForRent,
-                status,
-                photos,
-            },
-        });
-        return res.json({ message: 'Véhicule mis à jour', vehicule: updatedVehicule });
-    }
-    catch (err) {
-        console.error('Erreur lors de la mise à jour du véhicule :', err);
-        if (err.code === 'P2002') {
-            return res.status(400).json({
-                error: 'Un doublon a été détecté pour la marque.',
-                details: 'La marque existe déjà avec un nom similaire (insensible à la casse).',
-            });
-        }
-        return res.status(500).json({
-            error: 'Erreur lors de la mise à jour du véhicule',
-            details: err instanceof Error ? err.message : 'Erreur inconnue',
-        });
-    }
-});
-exports.updateVehicule = updateVehicule;
 // DELETE VEHICULE
 const deleteVehicule = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { id } = req.params;
@@ -909,3 +959,49 @@ function prepareMonthlyChartData(monthlyReservations) {
         rentals: rentalData
     };
 }
+// ADD VEHICLE VIEW WITH USER TRACKING
+const addVehicleView = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
+    try {
+        const { id } = req.params;
+        const userId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.id;
+        const vehicule = yield prisma.vehicle.findUnique({
+            where: { id: parseInt(id) }
+        });
+        if (!vehicule) {
+            return res.status(404).json({ error: 'Véhicule non trouvé' });
+        }
+        // Enregistrer la vue dans l'historique si utilisateur connecté (avec le schéma actuel)
+        if (userId) {
+            yield prisma.vehicleHistory.create({
+                data: {
+                    vehicleId: parseInt(id),
+                    changes: JSON.stringify({
+                        action: 'VIEW',
+                        userId: userId,
+                        timestamp: new Date().toISOString(),
+                        details: 'Consultation du véhicule'
+                    })
+                }
+            });
+        }
+        // Mettre à jour les statistiques de vues
+        yield prisma.vehicleStats.upsert({
+            where: { vehicleId: parseInt(id) },
+            update: { vues: { increment: 1 } },
+            create: {
+                vehicleId: parseInt(id),
+                vues: 1,
+                reservations: 0
+            }
+        });
+        return res.json({ message: 'Vue enregistrée avec succès' });
+    }
+    catch (err) {
+        console.error('Erreur lors de l\'ajout de la vue:', err);
+        return res.status(500).json({
+            error: 'Erreur lors de l\'enregistrement de la vue'
+        });
+    }
+});
+exports.addVehicleView = addVehicleView;
