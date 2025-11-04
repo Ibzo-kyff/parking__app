@@ -29,8 +29,8 @@ model User {
   passwordResetOTP         String?
   emailVerifyOTP           String?
   emailVerifyOTPExpires    DateTime?
-  passwordResetOTPExpires  DateTime?
   expoPushToken  String?
+  passwordResetOTPExpires  DateTime?
   favorites                Favorite[]
   messagesReceived         Message[]      @relation("ReceivedMessages")
   messagesSent             Message[]      @relation("SentMessages")
