@@ -11,7 +11,8 @@ import {
   getParkingStats,
   getParkingUserVehicles,
   getParkingUserVehicleById,
-  getParkingManagementData
+  getParkingManagementData,
+  addVehicleView
 } from '../controllers/vehiculeController';
 import { authenticateToken } from '../middleware/authMiddleware';
 import multer from 'multer';
@@ -41,5 +42,5 @@ router.get('/:id', getVehiculeById);
 router.get('/parking/my-vehicles/:id', authenticateToken, getParkingUserVehicleById);
 router.put('/:id', upload.array('photos'), updateVehicule);
 router.delete('/:id', deleteVehicule);
-
+router.post('/:id/view', addVehicleView);
 export default router;
