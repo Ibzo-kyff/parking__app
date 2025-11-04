@@ -27,4 +27,5 @@ router.get('/:id', vehiculeController_1.getVehiculeById);
 router.get('/parking/my-vehicles/:id', authMiddleware_1.authenticateToken, vehiculeController_1.getParkingUserVehicleById);
 router.put('/:id', upload.array('photos'), vehiculeController_1.updateVehicule);
 router.delete('/:id', vehiculeController_1.deleteVehicule);
+router.post('/:id/view', vehiculeController_1.addVehicleView);
 exports.default = router;

@@ -9,6 +9,9 @@
     "start": "node dist/index.js",
     "db:seed": "ts-node prisma/seed.ts"
   },
+  "prisma": {
+  "seed": "ts-node prisma/seed.ts"
+},
   "keywords": [],
   "author": "",
   "license": "ISC",
