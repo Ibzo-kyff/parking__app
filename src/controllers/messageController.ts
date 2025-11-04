@@ -1,14 +1,17 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
-import { pusher } from '../index'; // Importer Pusher
+import { PrismaClient, NotificationType } from '@prisma/client';
+import { pusher } from '../index';
+
+// Import de la fonction de notification push
+import { notifyUser } from '../utils/sendNotification';
 
 const prisma = new PrismaClient();
 
 interface AuthRequest extends Request {
-  user?: { id: number };
+  user?: { id: number; nom?: string; prenom?: string };
 }
 
-// ✅ Envoyer un message
+// === ENVOYER UN MESSAGE ===
 export const sendMessage = async (req: AuthRequest, res: Response) => {
   try {
     const senderId = req.user?.id;
@@ -17,52 +20,71 @@ export const sendMessage = async (req: AuthRequest, res: Response) => {
     if (!senderId) {
       return res.status(401).json({ message: 'Utilisateur non authentifié' });
     }
-    if (!receiverId || !content) {
+    if (!receiverId || !content?.trim()) {
       return res.status(400).json({ message: 'receiverId et content sont obligatoires' });
     }
 
-    // Vérifier les rôles (client-parking)
-    const sender = await prisma.user.findUnique({ where: { id: senderId }, select: { role: true } });
-    const receiver = await prisma.user.findUnique({ where: { id: receiverId }, select: { role: true } });
-    if (sender?.role === receiver?.role) {
-      return res.status(403).json({ message: 'Les messages doivent être entre un client et un parking' });
+    // Vérifier les rôles
+    const [sender, receiver] = await Promise.all([
+      prisma.user.findUnique({ where: { id: senderId }, select: { role: true, nom: true, prenom: true } }),
+      prisma.user.findUnique({ where: { id: receiverId }, select: { role: true } }),
+    ]);
+
+    if (!sender || !receiver) {
+      return res.status(404).json({ message: 'Utilisateur introuvable' });
+    }
+    if (sender.role === receiver.role) {
+      return res.status(403).json({ message: 'Les messages doivent être entre client et parking' });
     }
 
-    // Vérifier si parkingId est valide (si fourni)
+    // Vérifier parkingId si fourni
     if (parkingId) {
-      const parkingExists = await prisma.parking.findUnique({ where: { id: parkingId } });
-      if (!parkingExists) {
-        return res.status(404).json({ message: 'Parking introuvable' });
-      }
+      const parking = await prisma.parking.findUnique({ where: { id: parkingId } });
+      if (!parking) return res.status(404).json({ message: 'Parking introuvable' });
     }
 
     const message = await prisma.message.create({
-      data: { senderId, receiverId, content, parkingId },
+      data: { senderId, receiverId, content: content.trim(), parkingId },
       include: { sender: true, receiver: true, parking: true },
     });
 
-    // 🔔 Notification en temps réel avec Pusher
+    // === NOTIFICATION EN TEMPS RÉEL (PUSHER) ===
     await pusher.trigger(`user_${receiverId}`, 'newMessage', message);
     await pusher.trigger(`user_${senderId}`, 'newMessage', message);
 
-    // Créer une notification pour le destinataire
+    // === NOTIFICATION PUSH EXPO ===
+    const senderName = `${sender.nom || ''} ${sender.prenom || ''}`.trim() || 'Quelqu’un';
+    await notifyUser(
+      receiverId,
+      `Nouveau message de ${senderName}`,
+      content.substring(0, 100),
+      NotificationType.MESSAGE,
+      {
+        messageId: message.id,
+        senderId,
+        screen: 'Chat',
+        parkingId: parkingId || undefined,
+      }
+    ).catch(err => console.error('Échec push Expo (message):', err.message));
+
+    // === NOTIFICATION EN BASE (optionnel, tu l’as déjà) ===
     await prisma.notification.create({
       data: {
         userId: receiverId,
-        title: `Nouveau message de ${message.sender.nom} ${message.sender.prenom}`,
+        title: `Nouveau message de ${senderName}`,
         message: content.substring(0, 100),
         type: 'MESSAGE',
       },
     });
 
     res.status(201).json(message);
-  } catch (error) {
+  } catch (error: any) {
     console.error('Erreur sendMessage:', error);
-    res.status(500).json({ message: 'Erreur lors de l’envoi du message', error });
+    res.status(500).json({ message: 'Erreur lors de l’envoi du message' });
   }
 };
 
-// ✅ Récupérer la conversation entre l’utilisateur connecté et un autre utilisateur
+// === RÉCUPÉRER LA CONVERSATION ===
 export const getConversation = async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.user?.id;
@@ -70,9 +92,7 @@ export const getConversation = async (req: AuthRequest, res: Response) => {
     const page = parseInt(req.query.page as string) || 1;
     const pageSize = parseInt(req.query.pageSize as string) || 20;
 
-    if (!userId) {
-      return res.status(401).json({ message: 'Utilisateur non authentifié' });
-    }
+    if (!userId) return res.status(401).json({ message: 'Utilisateur non authentifié' });
 
     const messages = await prisma.message.findMany({
       where: {
@@ -80,7 +100,7 @@ export const getConversation = async (req: AuthRequest, res: Response) => {
           { senderId: userId, receiverId: otherUserId },
           { senderId: otherUserId, receiverId: userId },
         ],
-        deletedAt: null, // Exclure les messages supprimés
+        deletedAt: null,
       },
       orderBy: { createdAt: 'asc' },
       include: { sender: true, receiver: true, parking: true },
@@ -88,7 +108,7 @@ export const getConversation = async (req: AuthRequest, res: Response) => {
       take: pageSize,
     });
 
-    const totalMessages = await prisma.message.count({
+    const total = await prisma.message.count({
       where: {
         OR: [
           { senderId: userId, receiverId: otherUserId },
@@ -100,40 +120,35 @@ export const getConversation = async (req: AuthRequest, res: Response) => {
 
     res.json({
       messages,
-      totalPages: Math.ceil(totalMessages / pageSize),
+      totalPages: Math.ceil(total / pageSize),
       currentPage: page,
     });
   } catch (error) {
     console.error('Erreur getConversation:', error);
-    res.status(500).json({ message: 'Erreur lors de la récupération de la conversation', error });
+    res.status(500).json({ message: 'Erreur récupération conversation' });
   }
 };
 
-// Récupérer toutes les conversations (groupées par utilisateur)
+// === CONVERSATIONS GROUPÉES ===
 export const getUserConversations = async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ message: 'Non authentifié' });
 
-    if (!userId) {
-      return res.status(401).json({ message: 'Utilisateur non authentifié' });
-    }
-
-    // Récupérer le dernier message de chaque conversation
     const conversations = await prisma.message.groupBy({
       by: ['senderId', 'receiverId'],
       where: { OR: [{ senderId: userId }, { receiverId: userId }], deletedAt: null },
       _max: { createdAt: true },
     });
 
-    // Filtrer les conversations avec createdAt non null et mapper
     const latestMessages = await prisma.message.findMany({
       where: {
         OR: conversations
-          .filter((conv) => conv._max.createdAt !== null) // Exclure les createdAt null
-          .map((conv) => ({
-            senderId: conv.senderId,
-            receiverId: conv.receiverId,
-            createdAt: conv._max.createdAt!, // TypeScript sait que createdAt n'est pas null
+          .filter(c => c._max.createdAt !== null)
+          .map(c => ({
+            senderId: c.senderId,
+            receiverId: c.receiverId,
+            createdAt: c._max.createdAt!,
             deletedAt: null,
           })),
       },
@@ -141,135 +156,380 @@ export const getUserConversations = async (req: AuthRequest, res: Response) => {
       orderBy: { createdAt: 'desc' },
     });
 
-    // Regroupement par "autre utilisateur"
-    const conversationsMap: Record<number, any[]> = {};
-    latestMessages.forEach((msg) => {
-      const otherUserId = msg.senderId === userId ? msg.receiverId : msg.senderId;
-      if (!conversationsMap[otherUserId]) {
-        conversationsMap[otherUserId] = [];
-      }
-      conversationsMap[otherUserId].push(msg);
+    const map: Record<number, any> = {};
+    latestMessages.forEach(msg => {
+      const otherId = msg.senderId === userId ? msg.receiverId : msg.senderId;
+      if (!map[otherId]) map[otherId] = { user: msg.senderId === userId ? msg.receiver : msg.sender, lastMessage: msg };
     });
 
-    res.json(conversationsMap);
+    res.json(Object.values(map));
   } catch (error) {
     console.error('Erreur getUserConversations:', error);
-    res.status(500).json({ message: 'Erreur lors de la récupération des conversations', error });
+    res.status(500).json({ message: 'Erreur récupération conversations' });
   }
 };
 
-// ✅ Mettre à jour un message
+// === METTRE À JOUR UN MESSAGE ===
 export const updateMessage = async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.user?.id;
     const messageId = parseInt(req.params.id);
     const { content } = req.body;
 
-    if (!userId) {
-      return res.status(401).json({ message: 'Utilisateur non authentifié' });
-    }
-
-    if (!content || typeof content !== 'string' || content.trim() === '') {
-      return res.status(400).json({ message: 'Le contenu du message est obligatoire' });
-    }
+    if (!userId) return res.status(401).json({ message: 'Non authentifié' });
+    if (!content?.trim()) return res.status(400).json({ message: 'Contenu requis' });
 
     const message = await prisma.message.findUnique({ where: { id: messageId } });
+    if (!message) return res.status(404).json({ message: 'Message introuvable' });
+    if (message.senderId !== userId) return res.status(403).json({ message: 'Accès refusé' });
 
-    if (!message) {
-      return res.status(404).json({ message: 'Message introuvable' });
-    }
-
-    if (message.senderId !== userId) {
-      return res.status(403).json({ message: 'Vous ne pouvez modifier que vos propres messages' });
-    }
-
-    const updatedMessage = await prisma.message.update({
+    const updated = await prisma.message.update({
       where: { id: messageId },
-      data: { content },
+      data: { content: content.trim() },
       include: { sender: true, receiver: true, parking: true },
     });
 
-    // 🔔 Notifier les deux utilisateurs de la mise à jour
-    await pusher.trigger(`user_${message.receiverId}`, 'updateMessage', updatedMessage);
-    await pusher.trigger(`user_${message.senderId}`, 'updateMessage', updatedMessage);
+    await pusher.trigger(`user_${message.receiverId}`, 'updateMessage', updated);
+    await pusher.trigger(`user_${message.senderId}`, 'updateMessage', updated);
 
-    res.json(updatedMessage);
+    // Optionnel : push de mise à jour
+    await notifyUser(
+      message.receiverId,
+      'Message modifié',
+      `${req.user?.nom} a modifié un message.`,
+      NotificationType.MESSAGE,
+      { messageId, action: 'updated' }
+    ).catch(() => {});
+
+    res.json(updated);
   } catch (error) {
     console.error('Erreur updateMessage:', error);
-    res.status(500).json({ message: 'Erreur lors de la mise à jour du message', error });
+    res.status(500).json({ message: 'Erreur mise à jour' });
   }
 };
 
-// ✅ Supprimer un message (soft delete)
+// === SUPPRIMER UN MESSAGE (soft) ===
 export const deleteMessage = async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.user?.id;
     const messageId = parseInt(req.params.id);
 
-    if (!userId) {
-      return res.status(401).json({ message: 'Utilisateur non authentifié' });
-    }
+    if (!userId) return res.status(401).json({ message: 'Non authentifié' });
 
     const message = await prisma.message.findUnique({ where: { id: messageId } });
+    if (!message) return res.status(404).json({ message: 'Message introuvable' });
+    if (message.senderId !== userId) return res.status(403).json({ message: 'Accès refusé' });
 
-    if (!message) {
-      return res.status(404).json({ message: 'Message introuvable' });
-    }
-
-    if (message.senderId !== userId) {
-      return res.status(403).json({ message: 'Vous ne pouvez supprimer que vos propres messages' });
-    }
-
-    const deletedMessage = await prisma.message.update({
+    await prisma.message.update({
       where: { id: messageId },
       data: { deletedAt: new Date() },
-      include: { sender: true, receiver: true, parking: true },
     });
 
-    // 🔔 Notifier suppression aux deux utilisateurs
     await pusher.trigger(`user_${message.receiverId}`, 'deleteMessage', messageId);
     await pusher.trigger(`user_${message.senderId}`, 'deleteMessage', messageId);
 
-    res.json({ message: 'Message supprimé avec succès' });
+    res.json({ message: 'Message supprimé' });
   } catch (error) {
     console.error('Erreur deleteMessage:', error);
-    res.status(500).json({ message: 'Erreur lors de la suppression du message', error });
+    res.status(500).json({ message: 'Erreur suppression' });
   }
 };
 
-// ✅ Marquer un message comme lu
+// === MARQUER COMME LU ===
 export const markMessageAsRead = async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.user?.id;
     const messageId = parseInt(req.params.id);
 
-    if (!userId) {
-      return res.status(401).json({ message: 'Utilisateur non authentifié' });
-    }
+    if (!userId) return res.status(401).json({ message: 'Non authentifié' });
 
     const message = await prisma.message.findUnique({ where: { id: messageId } });
+    if (!message) return res.status(404).json({ message: 'Message introuvable' });
+    if (message.receiverId !== userId) return res.status(403).json({ message: 'Accès refusé' });
 
-    if (!message) {
-      return res.status(404).json({ message: 'Message introuvable' });
-    }
-
-    if (message.receiverId !== userId) {
-      return res.status(403).json({ message: 'Vous ne pouvez marquer que vos messages reçus comme lus' });
-    }
-
-    const updatedMessage = await prisma.message.update({
+    const updated = await prisma.message.update({
       where: { id: messageId },
       data: { read: true },
       include: { sender: true, receiver: true, parking: true },
     });
 
-    // 🔔 Notifier les deux utilisateurs
-    await pusher.trigger(`user_${message.senderId}`, 'messageRead', updatedMessage);
-    await pusher.trigger(`user_${message.receiverId}`, 'messageRead', updatedMessage);
+    await pusher.trigger(`user_${message.senderId}`, 'messageRead', updated);
+    await pusher.trigger(`user_${message.receiverId}`, 'messageRead', updated);
 
-    res.json(updatedMessage);
+    res.json(updated);
   } catch (error) {
     console.error('Erreur markMessageAsRead:', error);
-    res.status(500).json({ message: 'Erreur lors du marquage du message comme lu', error });
+    res.status(500).json({ message: 'Erreur marquage lu' });
   }
 };
+
+
+
+
+
+
+
+// import { Request, Response } from 'express';
+// import { PrismaClient, NotificationType } from '@prisma/client';
+// import { pusher } from '../index';
+
+// // Import de la fonction de notification push
+// import { notifyUser } from '../utils/sendNotification';
+
+// const prisma = new PrismaClient();
+
+// interface AuthRequest extends Request {
+//   user?: { id: number; nom?: string; prenom?: string };
+// }
+
+// // === ENVOYER UN MESSAGE ===
+// export const sendMessage = async (req: AuthRequest, res: Response) => {
+//   try {
+//     const senderId = req.user?.id;
+//     const { receiverId, content, parkingId } = req.body;
+
+//     if (!senderId) {
+//       return res.status(401).json({ message: 'Utilisateur non authentifié' });
+//     }
+//     if (!receiverId || !content?.trim()) {
+//       return res.status(400).json({ message: 'receiverId et content sont obligatoires' });
+//     }
+
+//     // Vérifier les rôles
+//     const [sender, receiver] = await Promise.all([
+//       prisma.user.findUnique({ where: { id: senderId }, select: { role: true, nom: true, prenom: true } }),
+//       prisma.user.findUnique({ where: { id: receiverId }, select: { role: true } }),
+//     ]);
+
+//     if (!sender || !receiver) {
+//       return res.status(404).json({ message: 'Utilisateur introuvable' });
+//     }
+//     if (sender.role === receiver.role) {
+//       return res.status(403).json({ message: 'Les messages doivent être entre client et parking' });
+//     }
+
+//     // Vérifier parkingId si fourni
+//     if (parkingId) {
+//       const parking = await prisma.parking.findUnique({ where: { id: parkingId } });
+//       if (!parking) return res.status(404).json({ message: 'Parking introuvable' });
+//     }
+
+//     const message = await prisma.message.create({
+//       data: { senderId, receiverId, content: content.trim(), parkingId },
+//       include: { sender: true, receiver: true, parking: true },
+//     });
+
+//     // === NOTIFICATION EN TEMPS RÉEL (PUSHER) ===
+//     await pusher.trigger(`user_${receiverId}`, 'newMessage', message);
+//     await pusher.trigger(`user_${senderId}`, 'newMessage', message);
+
+//     // === NOTIFICATION PUSH EXPO ===
+//     const senderName = `${sender.nom || ''} ${sender.prenom || ''}`.trim() || 'Quelqu’un';
+//     await notifyUser(
+//       receiverId,
+//       `Nouveau message de ${senderName}`,
+//       content.substring(0, 100),
+//       NotificationType.MESSAGE,
+//       {
+//         messageId: message.id,
+//         senderId,
+//         screen: 'Chat',
+//         parkingId: parkingId || undefined,
+//       }
+//     ).catch(err => console.error('Échec push Expo (message):', err.message));
+
+//     // === NOTIFICATION EN BASE (optionnel, tu l’as déjà) ===
+//     await prisma.notification.create({
+//       data: {
+//         userId: receiverId,
+//         title: `Nouveau message de ${senderName}`,
+//         message: content.substring(0, 100),
+//         type: 'MESSAGE',
+//       },
+//     });
+
+//     res.status(201).json(message);
+//   } catch (error: any) {
+//     console.error('Erreur sendMessage:', error);
+//     res.status(500).json({ message: 'Erreur lors de l’envoi du message' });
+//   }
+// };
+
+// // === RÉCUPÉRER LA CONVERSATION ===
+// export const getConversation = async (req: AuthRequest, res: Response) => {
+//   try {
+//     const userId = req.user?.id;
+//     const otherUserId = parseInt(req.params.userId);
+//     const page = parseInt(req.query.page as string) || 1;
+//     const pageSize = parseInt(req.query.pageSize as string) || 20;
+
+//     if (!userId) return res.status(401).json({ message: 'Utilisateur non authentifié' });
+
+//     const messages = await prisma.message.findMany({
+//       where: {
+//         OR: [
+//           { senderId: userId, receiverId: otherUserId },
+//           { senderId: otherUserId, receiverId: userId },
+//         ],
+//         deletedAt: null,
+//       },
+//       orderBy: { createdAt: 'asc' },
+//       include: { sender: true, receiver: true, parking: true },
+//       skip: (page - 1) * pageSize,
+//       take: pageSize,
+//     });
+
+//     const total = await prisma.message.count({
+//       where: {
+//         OR: [
+//           { senderId: userId, receiverId: otherUserId },
+//           { senderId: otherUserId, receiverId: userId },
+//         ],
+//         deletedAt: null,
+//       },
+//     });
+
+//     res.json({
+//       messages,
+//       totalPages: Math.ceil(total / pageSize),
+//       currentPage: page,
+//     });
+//   } catch (error) {
+//     console.error('Erreur getConversation:', error);
+//     res.status(500).json({ message: 'Erreur récupération conversation' });
+//   }
+// };
+
+// // === CONVERSATIONS GROUPÉES ===
+// export const getUserConversations = async (req: AuthRequest, res: Response) => {
+//   try {
+//     const userId = req.user?.id;
+//     if (!userId) return res.status(401).json({ message: 'Non authentifié' });
+
+//     const conversations = await prisma.message.groupBy({
+//       by: ['senderId', 'receiverId'],
+//       where: { OR: [{ senderId: userId }, { receiverId: userId }], deletedAt: null },
+//       _max: { createdAt: true },
+//     });
+
+//     const latestMessages = await prisma.message.findMany({
+//       where: {
+//         OR: conversations
+//           .filter(c => c._max.createdAt !== null)
+//           .map(c => ({
+//             senderId: c.senderId,
+//             receiverId: c.receiverId,
+//             createdAt: c._max.createdAt!,
+//             deletedAt: null,
+//           })),
+//       },
+//       include: { sender: true, receiver: true, parking: true },
+//       orderBy: { createdAt: 'desc' },
+//     });
+
+//     const map: Record<number, any> = {};
+//     latestMessages.forEach(msg => {
+//       const otherId = msg.senderId === userId ? msg.receiverId : msg.senderId;
+//       if (!map[otherId]) map[otherId] = { user: msg.senderId === userId ? msg.receiver : msg.sender, lastMessage: msg };
+//     });
+
+//     res.json(Object.values(map));
+//   } catch (error) {
+//     console.error('Erreur getUserConversations:', error);
+//     res.status(500).json({ message: 'Erreur récupération conversations' });
+//   }
+// };
+
+// // === METTRE À JOUR UN MESSAGE ===
+// export const updateMessage = async (req: AuthRequest, res: Response) => {
+//   try {
+//     const userId = req.user?.id;
+//     const messageId = parseInt(req.params.id);
+//     const { content } = req.body;
+
+//     if (!userId) return res.status(401).json({ message: 'Non authentifié' });
+//     if (!content?.trim()) return res.status(400).json({ message: 'Contenu requis' });
+
+//     const message = await prisma.message.findUnique({ where: { id: messageId } });
+//     if (!message) return res.status(404).json({ message: 'Message introuvable' });
+//     if (message.senderId !== userId) return res.status(403).json({ message: 'Accès refusé' });
+
+//     const updated = await prisma.message.update({
+//       where: { id: messageId },
+//       data: { content: content.trim() },
+//       include: { sender: true, receiver: true, parking: true },
+//     });
+
+//     await pusher.trigger(`user_${message.receiverId}`, 'updateMessage', updated);
+//     await pusher.trigger(`user_${message.senderId}`, 'updateMessage', updated);
+
+//     // Optionnel : push de mise à jour
+//     await notifyUser(
+//       message.receiverId,
+//       'Message modifié',
+//       `${req.user?.nom} a modifié un message.`,
+//       NotificationType.MESSAGE,
+//       { messageId, action: 'updated' }
+//     ).catch(() => {});
+
+//     res.json(updated);
+//   } catch (error) {
+//     console.error('Erreur updateMessage:', error);
+//     res.status(500).json({ message: 'Erreur mise à jour' });
+//   }
+// };
+
+// // === SUPPRIMER UN MESSAGE (soft) ===
+// export const deleteMessage = async (req: AuthRequest, res: Response) => {
+//   try {
+//     const userId = req.user?.id;
+//     const messageId = parseInt(req.params.id);
+
+//     if (!userId) return res.status(401).json({ message: 'Non authentifié' });
+
+//     const message = await prisma.message.findUnique({ where: { id: messageId } });
+//     if (!message) return res.status(404).json({ message: 'Message introuvable' });
+//     if (message.senderId !== userId) return res.status(403).json({ message: 'Accès refusé' });
+
+//     await prisma.message.update({
+//       where: { id: messageId },
+//       data: { deletedAt: new Date() },
+//     });
+
+//     await pusher.trigger(`user_${message.receiverId}`, 'deleteMessage', messageId);
+//     await pusher.trigger(`user_${message.senderId}`, 'deleteMessage', messageId);
+
+//     res.json({ message: 'Message supprimé' });
+//   } catch (error) {
+//     console.error('Erreur deleteMessage:', error);
+//     res.status(500).json({ message: 'Erreur suppression' });
+//   }
+// };
+
+// // === MARQUER COMME LU ===
+// export const markMessageAsRead = async (req: AuthRequest, res: Response) => {
+//   try {
+//     const userId = req.user?.id;
+//     const messageId = parseInt(req.params.id);
+
+//     if (!userId) return res.status(401).json({ message: 'Non authentifié' });
+
+//     const message = await prisma.message.findUnique({ where: { id: messageId } });
+//     if (!message) return res.status(404).json({ message: 'Message introuvable' });
+//     if (message.receiverId !== userId) return res.status(403).json({ message: 'Accès refusé' });
+
+//     const updated = await prisma.message.update({
+//       where: { id: messageId },
+//       data: { read: true },
+//       include: { sender: true, receiver: true, parking: true },
+//     });
+
+//     await pusher.trigger(`user_${message.senderId}`, 'messageRead', updated);
+//     await pusher.trigger(`user_${message.receiverId}`, 'messageRead', updated);
+
+//     res.json(updated);
+//   } catch (error) {
+//     console.error('Erreur markMessageAsRead:', error);
+//     res.status(500).json({ message: 'Erreur marquage lu' });
+//   }
+// };
