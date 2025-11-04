@@ -20,7 +20,7 @@ const cookie_parser_1 = __importDefault(require("cookie-parser"));
 const vehiculeRoutes_1 = __importDefault(require("./routes/vehiculeRoutes"));
 const parkingRoutes_1 = __importDefault(require("./routes/parkingRoutes"));
 const reservationRoute_1 = __importDefault(require("./routes/reservationRoute"));
-const notificationRoute_1 = __importDefault(require("./routes/notificationRoute"));
+const notificationRoutes_1 = __importDefault(require("./routes/notificationRoutes"));
 const marqueRoutes_1 = __importDefault(require("./routes/marqueRoutes"));
 const messageRoutes_1 = __importDefault(require("./routes/messageRoutes"));
 const pusher_1 = __importDefault(require("pusher"));
@@ -41,7 +41,7 @@ app.use('/api/auth', authRoutes_1.default);
 app.use('/api/vehicules', vehiculeRoutes_1.default);
 app.use('/api/parkings', parkingRoutes_1.default);
 app.use('/api/reservations', reservationRoute_1.default);
-app.use('/api/notifications', notificationRoute_1.default);
+app.use('/api/notifications', notificationRoutes_1.default);
 app.use('/api/marques', marqueRoutes_1.default);
 app.use('/api/messages', messageRoutes_1.default);
 // Middleware global d'erreurs
