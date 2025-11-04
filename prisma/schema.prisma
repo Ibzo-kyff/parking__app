@@ -27,6 +27,7 @@ model User {
   passwordResetOTPExpires DateTime? 
   emailVerifyOTP        String?   
   emailVerifyOTPExpires DateTime? 
+  expoPushToken  String?
   status               Status   @default(PENDING) // Utilisé uniquement pour PARKING ou ADMIN
   createdAt            DateTime  @default(now())
   updatedAt            DateTime  @updatedAt

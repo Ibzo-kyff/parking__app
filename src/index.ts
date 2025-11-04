@@ -5,7 +5,7 @@ import cookieParser from 'cookie-parser';
 import vehiculeRoutes from './routes/vehiculeRoutes';
 import parkingRoutes from './routes/parkingRoutes';
 import reservationRoutes from './routes/reservationRoute';
-import notificationRoutes from './routes/notificationRoute';
+import notificationRoutes from './routes/notificationRoutes';
 import marqueRoutes from './routes/marqueRoutes';
 import messageRoutes from './routes/messageRoutes';
 import Pusher from 'pusher';

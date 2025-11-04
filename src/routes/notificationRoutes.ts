@@ -1,3 +1,4 @@
+// routes/notificationRoute.ts
 import express from 'express';
 import {
   createNotification,
@@ -5,11 +6,10 @@ import {
   getNotificationById,
   markAsRead,
   deleteNotification
-} from '../controllers/notificationContoller';
+} from '../controllers/notificationContoller' // ← CORRIGÉ
 
 const router = express.Router();
 
-// Routes pour les notifications
 router.post('/', createNotification);
 router.get('/', getNotifications);
 router.get('/:id', getNotificationById);
