@@ -5,7 +5,9 @@ import { PrismaClient, Status } from '@prisma/client';
 const prisma = new PrismaClient();
 
 export interface AuthRequest extends Request {
-  user?: { id: number; email: string; role: string }; // Typage précis basé sur le payload
+  user?: {
+    id: number; email: string; role: string 
+}; // Typage précis basé sur le payload
 }
 
 export const authenticateToken = async (req: AuthRequest, res: Response, next: NextFunction) => {
