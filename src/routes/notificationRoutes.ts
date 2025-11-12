@@ -1,19 +1,17 @@
-// routes/notificationRoute.ts
-import express from 'express';
+import express from "express";
+import { authenticateToken } from "../middleware/authMiddleware";
 import {
   createNotification,
   getNotifications,
-  getNotificationById,
   markAsRead,
-  deleteNotification
-} from '../controllers/notificationContoller' // ← CORRIGÉ
+  deleteNotification,
+} from "../controllers/notificationController";
 
 const router = express.Router();
 
-router.post('/', createNotification);
-router.get('/', getNotifications);
-router.get('/:id', getNotificationById);
-router.patch('/:id/read', markAsRead);
-router.delete('/:id', deleteNotification);
+router.post("/", authenticateToken, createNotification);
+router.get("/", authenticateToken, getNotifications);
+router.patch("/:id/read", authenticateToken, markAsRead);
+router.delete("/:id", authenticateToken, deleteNotification);
 
 export default router;
