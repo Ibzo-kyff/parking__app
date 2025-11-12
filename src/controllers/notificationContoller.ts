@@ -1,13 +1,14 @@
-// controllers/notificationController.ts
-import { Request, Response } from 'express';
+// src/controllers/notificationController.ts
+import {  Response } from 'express'; // ← AVANT
 import { PrismaClient, NotificationType } from '@prisma/client';
 import { z } from 'zod';
 import { Expo } from 'expo-server-sdk';
 
+import { AuthRequest } from '../middleware/authMiddleware'; // ← ICI !
 const prisma = new PrismaClient();
 const expo = new Expo({ accessToken: process.env.EXPO_ACCESS_TOKEN });
 
-// === SCHÉMA ===
+// === SCHÉMA DE VALIDATION ===
 const createNotificationSchema = z.object({
   title: z.string().min(3).max(100),
   message: z.string().min(5).max(500),
@@ -24,7 +25,7 @@ const sendPushNotification = async (
   data: Record<string, unknown>
 ): Promise<any> => {
   if (!Expo.isExpoPushToken(token)) {
-    console.warn('Token invalide:', token);
+    console.warn('Token Expo invalide:', token);
     return null;
   }
 
@@ -43,16 +44,16 @@ const sendPushNotification = async (
 
     if (receipt.status === 'error') {
       if (receipt.details?.error === 'DeviceNotRegistered') {
-        console.warn('Token périmé → suppression:', token);
+        console.warn('Token Expo périmé → suppression:', token);
         await prisma.user.updateMany({
           where: { expoPushToken: token },
           data: { expoPushToken: null },
         });
       } else {
-        console.error('Erreur push:', receipt.details?.error);
+        console.error('Erreur push Expo:', receipt.details?.error);
       }
     } else {
-      console.log('Push envoyé:', receipt.id);
+      console.log('Push envoyé avec succès:', receipt.id);
     }
     return receipt;
   } catch (error: any) {
@@ -61,13 +62,26 @@ const sendPushNotification = async (
   }
 };
 
-// === CRÉER NOTIFICATION ===
-export const createNotification = async (req: Request, res: Response) => {
+// === VÉRIFIER PROPRIÉTÉ DE LA NOTIFICATION ===
+const checkNotificationOwnership = async (notificationId: number, userId: number) => {
+  return await prisma.notification.findFirst({
+    where: {
+      id: notificationId,
+      OR: [
+        { userId }, // Notification directe à l'utilisateur
+        { parking: { userId } }, // Notification au parking → propriétaire
+      ],
+    },
+  });
+};
+
+// === CRÉER UNE NOTIFICATION (admin/système) ===
+export const createNotification = async (req: AuthRequest, res: Response) => {
   try {
     const data = createNotificationSchema.parse(req.body);
     const { userId, parkingId, title, message, type } = data;
 
-    // Validation exclusive
+    // Validation : un seul des deux
     if ((userId && parkingId) || (!userId && !parkingId)) {
       return res.status(400).json({
         error: 'Doit avoir soit userId, soit parkingId (pas les deux)',
@@ -93,7 +107,7 @@ export const createNotification = async (req: Request, res: Response) => {
       },
     });
 
-    // Récupérer le token
+    // Récupérer le token Expo
     let token: string | null = null;
     if (userId && notification.user?.expoPushToken) {
       token = notification.user.expoPushToken;
@@ -101,7 +115,7 @@ export const createNotification = async (req: Request, res: Response) => {
       token = notification.parking.user.expoPushToken;
     }
 
-    // Envoyer le push
+    // Envoyer push
     if (token) {
       await sendPushNotification(token, title, message, {
         notificationId: notification.id,
@@ -125,21 +139,24 @@ export const createNotification = async (req: Request, res: Response) => {
   }
 };
 
-// === LES AUTRES FONCTIONS (get, mark, delete) RESTENT IDENTIQUES ===
-export const getNotifications = async (req: Request, res: Response) => {
+// === LISTE DES NOTIFICATIONS (SEULEMENT LES SIENNES) ===
+export const getNotifications = async (req: AuthRequest, res: Response) => {
   try {
-    const { userId, parkingId, read, type } = req.query;
+    const userId = req.user!.id;
+    const { read, type } = req.query;
 
     const notifications = await prisma.notification.findMany({
       where: {
-        ...(userId && { userId: Number(userId) }),
-        ...(parkingId && { parkingId: Number(parkingId) }),
+        OR: [
+          { userId },
+          { parking: { userId } },
+        ],
         ...(read !== undefined && { read: read === 'true' }),
         ...(type && { type: type as NotificationType }),
       },
       orderBy: { createdAt: 'desc' },
       include: {
-        user: { select: { id: true, email: true } },
+        user: { select: { id: true, email: true, nom: true, prenom: true } },
         parking: { select: { id: true, name: true } },
       },
     });
@@ -151,50 +168,77 @@ export const getNotifications = async (req: Request, res: Response) => {
   }
 };
 
-export const getNotificationById = async (req: Request, res: Response) => {
+// === DÉTAIL D'UNE NOTIFICATION ===
+export const getNotificationById = async (req: AuthRequest, res: Response) => {
   try {
-    const notification = await prisma.notification.findUnique({
-      where: { id: Number(req.params.id) },
+    const userId = req.user!.id;
+    const notificationId = Number(req.params.id);
+
+    console.log(`[DEBUG] User ID: ${userId} | Notification ID: ${notificationId}`);
+
+    const notification = await checkNotificationOwnership(notificationId, userId);
+
+    if (!notification) {
+      console.log('[DEBUG] Accès refusé ou notification inexistante');
+      return res.status(404).json({ error: 'Notification non trouvée ou accès refusé' });
+    }
+
+    const fullNotification = await prisma.notification.findUnique({
+      where: { id: notificationId },
       include: {
-        user: { select: { id: true, email: true } },
-        parking: { select: { id: true, name: true } },
+        user: { select: { id: true, email: true, nom: true, prenom: true } },
+        parking: {
+          select: {
+            id: true,
+            name: true,
+            user: { select: { id: true, email: true } },
+          },
+        },
       },
     });
 
-    if (!notification) {
-      return res.status(404).json({ error: 'Notification non trouvée' });
-    }
-
-    return res.json({ success: true, data: notification });
+    return res.json({ success: true, data: fullNotification });
   } catch (err) {
     console.error('Erreur get notification:', err);
     return res.status(500).json({ error: 'Erreur serveur' });
   }
 };
 
-export const markAsRead = async (req: Request, res: Response) => {
+// === MARQUER COMME LUE ===
+export const markAsRead = async (req: AuthRequest, res: Response) => {
   try {
-    const notification = await prisma.notification.update({
-      where: { id: Number(req.params.id) },
+    const userId = req.user!.id;
+    const notificationId = Number(req.params.id);
+
+    const notification = await checkNotificationOwnership(notificationId, userId);
+    if (!notification) {
+      return res.status(404).json({ error: 'Notification non trouvée ou accès refusé' });
+    }
+
+    const updated = await prisma.notification.update({
+      where: { id: notificationId },
       data: { read: true },
     });
 
-    return res.json({
-      success: true,
-      message: 'Marquée comme lue',
-      data: notification,
-    });
+    return res.json({ success: true, message: 'Marquée comme lue', data: updated });
   } catch (err) {
     console.error('Erreur mark as read:', err);
     return res.status(500).json({ error: 'Erreur serveur' });
   }
 };
 
-export const deleteNotification = async (req: Request, res: Response) => {
+// === SUPPRIMER UNE NOTIFICATION ===
+export const deleteNotification = async (req: AuthRequest, res: Response) => {
   try {
-    await prisma.notification.delete({
-      where: { id: Number(req.params.id) },
-    });
+    const userId = req.user!.id;
+    const notificationId = Number(req.params.id);
+
+    const notification = await checkNotificationOwnership(notificationId, userId);
+    if (!notification) {
+      return res.status(404).json({ error: 'Notification non trouvée ou accès refusé' });
+    }
+
+    await prisma.notification.delete({ where: { id: notificationId } });
 
     return res.json({ success: true, message: 'Supprimée avec succès' });
   } catch (err) {
