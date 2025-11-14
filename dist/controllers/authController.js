@@ -159,6 +159,7 @@ const register = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
         return res.status(201).json({
             message: 'Inscription réussie. Vérifiez votre email avec le code OTP.',
             accessToken,
+            refreshToken,
             nom: user.nom,
             prenom: user.prenom,
             email: user.email,
@@ -209,6 +210,7 @@ const login = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
         return res.status(200).json({
             message: 'Connexion réussie',
             accessToken,
+            refreshToken,
             role: user.role,
             emailVerified: user.emailVerified,
             nom: user.nom,
@@ -227,7 +229,11 @@ const login = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
 });
 exports.login = login;
 const refreshTokenHandler = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    const refreshToken = req.cookies.refreshToken;
+    let refreshToken = req.cookies.refreshToken; // Priorité au cookie pour web
+    // Fallback pour apps mobiles : body ou header
+    if (!refreshToken) {
+        refreshToken = req.body.refreshToken || req.headers['x-refresh-token'];
+    }
     if (!refreshToken) {
         return res.status(401).json({ message: 'Refresh token manquant' });
     }
@@ -245,13 +251,18 @@ const refreshTokenHandler = (req, res) => __awaiter(void 0, void 0, void 0, func
             where: { id: user.id },
             data: { refreshToken: newRefreshToken },
         });
+        // Pour web : set cookie
         res.cookie('refreshToken', newRefreshToken, {
             httpOnly: true,
             secure: process.env.NODE_ENV === 'production',
             sameSite: 'strict',
             maxAge: 7 * 24 * 60 * 60 * 1000,
         });
-        return res.json({ accessToken: newAccessToken });
+        // Pour tous : renvoie aussi le newRefreshToken dans la réponse JSON
+        return res.json({
+            accessToken: newAccessToken,
+            refreshToken: newRefreshToken // Ajout pour mobile
+        });
     }
     catch (err) {
         console.error('Erreur lors du rafraîchissement du token:', err);
