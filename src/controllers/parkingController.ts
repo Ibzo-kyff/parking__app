@@ -2,11 +2,16 @@ import { Request, Response } from 'express';
 import { PrismaClient, ParkingStatus, Role } from '@prisma/client';
 import { put, del } from '@vercel/blob'; 
 import path from 'path';
+import { JwtPayload } from 'jsonwebtoken';
 
 const prisma = new PrismaClient();
 
+interface AuthRequest extends Request {
+  user?: JwtPayload & { id: number; role: Role };
+}
+
 // CREATE PARKING
-export const createParking = async (req: Request, res: Response) => {
+export const createParking = async (req: AuthRequest, res: Response) => {
   const {
     userId,
     name,
@@ -21,6 +26,10 @@ export const createParking = async (req: Request, res: Response) => {
   } = req.body;
 
   try {
+    if (!req.user || Number(userId) !== req.user.id) {
+      return res.status(403).json({ error: "Non autorisé" });
+    }
+
     const user = await prisma.user.findUnique({ where: { id: Number(userId) } });
     if (!user || user.role !== Role.PARKING) {
       return res.status(400).json({ error: "Utilisateur invalide ou non autorisé à gérer un parking." });
@@ -74,6 +83,7 @@ export const createParking = async (req: Request, res: Response) => {
     return res.status(500).json({ error: 'Erreur lors de la création du parking', details: err.message });
   }
 };
+
 // GET ALL PARKINGS (inchangé)
 export const getAllParkings = async (_req: Request, res: Response) => {
   try {
@@ -83,6 +93,29 @@ export const getAllParkings = async (_req: Request, res: Response) => {
     return res.json(parkings);
   } catch (err) {
     return res.status(500).json({ error: 'Erreur lors de la récupération des parkings' });
+  }
+};
+
+// GET MY PARKING
+export const getMyParking = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ error: 'Non authentifié' });
+    }
+
+    const parking = await prisma.parking.findUnique({
+      where: { userId: req.user.id },
+      include: { user: true, vehicles: true }
+    });
+
+    if (!parking) {
+      return res.status(404).json({ error: 'Parking non trouvé' });
+    }
+
+    return res.json(parking);
+  } catch (err: any) {
+    console.error(err);
+    return res.status(500).json({ error: 'Erreur lors de la récupération du parking', details: err.message });
   }
 };
 
@@ -104,7 +137,7 @@ export const getParkingById = async (req: Request, res: Response) => {
 };
 
 // UPDATE PARKING
-export const updateParking = async (req: Request, res: Response) => {
+export const updateParking = async (req: AuthRequest, res: Response) => {
   const { id } = req.params;
   const {
     name,
@@ -119,10 +152,18 @@ export const updateParking = async (req: Request, res: Response) => {
   } = req.body;
 
   try {
+    if (!req.user) {
+      return res.status(401).json({ error: 'Non authentifié' });
+    }
+
     // Vérifier si parking existe
     const parking = await prisma.parking.findUnique({ where: { id: Number(id) } });
     if (!parking) {
       return res.status(404).json({ error: 'Parking non trouvé' });
+    }
+
+    if (parking.userId !== req.user.id) {
+      return res.status(403).json({ error: 'Non autorisé à modifier ce parking' });
     }
 
     let newLogo = parking.logo;
@@ -172,11 +213,23 @@ export const updateParking = async (req: Request, res: Response) => {
 };
 
 // DELETE PARKING (optionnel : ajoutez suppression du logo si besoin)
-export const deleteParking = async (req: Request, res: Response) => {
+export const deleteParking = async (req: AuthRequest, res: Response) => {
   const { id } = req.params;
   try {
+    if (!req.user) {
+      return res.status(401).json({ error: 'Non authentifié' });
+    }
+
     const parking = await prisma.parking.findUnique({ where: { id: parseInt(id) } });
-    if (parking && parking.logo) {
+    if (!parking) {
+      return res.status(404).json({ error: 'Parking non trouvé' });
+    }
+
+    if (parking.userId !== req.user.id) {
+      return res.status(403).json({ error: 'Non autorisé à supprimer ce parking' });
+    }
+
+    if (parking.logo) {
       // Supprimer le logo du blob
       const url = new URL(parking.logo);
       await del(url.pathname.slice(1));

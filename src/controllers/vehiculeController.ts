@@ -78,6 +78,7 @@ export const createVehicule = async (req: Request, res: Response) => {
       mileage,
       forSale,
       forRent,
+      transmission,
     } = req.body;
 
     // Validation des champs obligatoires
@@ -128,6 +129,12 @@ export const createVehicule = async (req: Request, res: Response) => {
 
     const parsedMileage = mileage ? Number(mileage) : null;
 
+    // Validation de la transmission
+    const parsedTransmission = transmission ? transmission.toUpperCase() : 'MANUAL';
+    if (!['MANUAL', 'AUTOMATIC'].includes(parsedTransmission)) {
+      return res.status(400).json({ error: 'La transmission doit être MANUAL ou AUTOMATIC.' });
+    }
+
     // Gérer la marque avec la fonction utilitaire
     let marqueEntity;
     try {
@@ -171,6 +178,7 @@ export const createVehicule = async (req: Request, res: Response) => {
         vignette: parsedVignette,
         forSale: parsedForSale,
         forRent: parsedForRent,
+        transmission: parsedTransmission as 'MANUAL' | 'AUTOMATIC',
         photos,
         userOwnerId: userOwnerId ? Number(userOwnerId) : undefined,
         parkingId: parkingId ? Number(parkingId) : undefined,
@@ -208,6 +216,7 @@ export const updateVehicule = async (req: Request, res: Response) => {
     status,
     forSale,
     forRent,
+    transmission,
   } = req.body;
 
   try {
@@ -262,6 +271,16 @@ export const updateVehicule = async (req: Request, res: Response) => {
     const parsedForSale = forSale !== undefined ? forSale === 'true' : undefined;
     const parsedForRent = forRent !== undefined ? forRent === 'true' : undefined;
 
+    // Validation de la transmission si fournie
+    let parsedTransmission: 'MANUAL' | 'AUTOMATIC' | undefined = undefined;
+    if (transmission) {
+      const upperTransmission = transmission.toUpperCase();
+      if (!['MANUAL', 'AUTOMATIC'].includes(upperTransmission)) {
+        return res.status(400).json({ error: 'La transmission doit être MANUAL ou AUTOMATIC.' });
+      }
+      parsedTransmission = upperTransmission as 'MANUAL' | 'AUTOMATIC';
+    }
+
     // Gérer les nouvelles photos
     let photos = vehicule.photos; // Garder les photos existantes par défaut
     const files = req.files as Express.Multer.File[];
@@ -310,6 +329,7 @@ export const updateVehicule = async (req: Request, res: Response) => {
         forSale: parsedForSale,
         forRent: parsedForRent,
         status,
+        transmission: parsedTransmission,
         photos,
       },
     });
@@ -346,6 +366,7 @@ export const getAllVehicules = async (req: Request, res: Response) => {
     status,
     forSale,
     forRent,
+    transmission,
   } = req.query;
 
   try {
@@ -399,6 +420,10 @@ export const getAllVehicules = async (req: Request, res: Response) => {
 
     if (forRent !== undefined) {
       where.forRent = forRent === 'true';
+    }
+
+    if (transmission) {
+      where.transmission = transmission as string;
     }
 
     const vehicules = await prisma.vehicle.findMany({
@@ -601,7 +626,8 @@ export const getParkingUserVehicles = async (req: AuthRequest, res: Response) =>
             id: true,
             type: true,
             dateDebut: true,
-            dateFin: true
+            dateFin: true,
+            status: true
           }
         },
         marqueRef: true
@@ -616,8 +642,8 @@ export const getParkingUserVehicles = async (req: AuthRequest, res: Response) =>
     const now = new Date();
     const stats = {
       total: vehicles.length,
-      vendus: vehicles.filter(v => v.reservations.some(r => r.type === 'ACHAT' && (!r.dateFin || new Date(r.dateFin) > now))).length,
-      enLocation: vehicles.filter(v => v.reservations.some(r => r.type === 'LOCATION' && new Date(r.dateFin!) > now)).length,
+      vendus: vehicles.filter(v => v.reservations.some(r => r.type === 'ACHAT' && r.status === 'ACCEPTED' && (!r.dateFin || new Date(r.dateFin) > now))).length,
+      enLocation: vehicles.filter(v => v.reservations.some(r => r.type === 'LOCATION' && r.status === 'ACCEPTED' && new Date(r.dateFin!) > now)).length,
       disponibles: vehicles.filter(v => v.status === 'DISPONIBLE').length,
       enMaintenance: vehicles.filter(v => v.status === 'EN_MAINTENANCE').length,
       indisponibles: vehicles.filter(v => v.status === 'INDISPONIBLE').length,
@@ -634,7 +660,7 @@ export const getParkingUserVehicles = async (req: AuthRequest, res: Response) =>
         reservations: vehicle.stats?.reservations || 0,
         favoris: vehicle.favorites.length,
         reservationsActives: vehicle.reservations.filter(r =>
-          (r.dateFin ? new Date(r.dateFin) > now : true)
+          r.status === 'ACCEPTED' && (r.dateFin ? new Date(r.dateFin) > now : true)
         ).length
       }
     }));
@@ -807,7 +833,7 @@ export const getParkingUserVehicleById = async (req: AuthRequest, res: Response)
         reservations: vehicle.stats?.reservations || 0,
         favoris: vehicle.favorites.length,
         reservationsActives: vehicle.reservations.filter(r => 
-          (r.dateFin ? new Date(r.dateFin) > now : true)
+          r.status === 'ACCEPTED' && (r.dateFin ? new Date(r.dateFin) > now : true)
         ).length,
         reservationsTotal: vehicle.reservations.length
       }
@@ -896,6 +922,7 @@ export const getParkingManagementData = async (req: AuthRequest, res: Response) 
         },
         reservations: {
           where: {
+            status: 'ACCEPTED',
             dateFin: {
               gte: new Date()
             }
@@ -905,6 +932,7 @@ export const getParkingManagementData = async (req: AuthRequest, res: Response) 
             type: true,
             dateDebut: true,
             dateFin: true,
+            status: true,
             user: {
               select: {
                 nom: true,
@@ -931,6 +959,7 @@ export const getParkingManagementData = async (req: AuthRequest, res: Response) 
     const monthlyReservations = await prisma.reservation.groupBy({
       by: ['type', 'createdAt'],
       where: {
+        status: 'ACCEPTED',
         vehicle: {
           parkingId: parking.id
         },
@@ -946,19 +975,19 @@ export const getParkingManagementData = async (req: AuthRequest, res: Response) 
     // Calculer les statistiques globales
     const now = new Date();
     const activeReservations = vehicles.flatMap(v => v.reservations)
-  .filter(r => {
-    const dateDebut = r.dateDebut ? new Date(r.dateDebut) : null;
-    const dateFin = r.dateFin ? new Date(r.dateFin) : null;
+      .filter(r => {
+        const dateDebut = r.dateDebut ? new Date(r.dateDebut) : null;
+        const dateFin = r.dateFin ? new Date(r.dateFin) : null;
 
-    return dateFin
-      ? dateDebut !== null && dateDebut <= now && dateFin >= now
-      : dateDebut !== null && dateDebut <= now;
-  });
+        return r.status === 'ACCEPTED' && dateFin
+          ? dateDebut !== null && dateDebut <= now && dateFin >= now
+          : dateDebut !== null && dateDebut <= now;
+      });
 
     const stats = {
       total: vehicles.length,
-      vendus: vehicles.filter(v => v.reservations.some(r => r.type === 'ACHAT' && (!r.dateFin || new Date(r.dateFin) > now))).length,
-      enLocation: vehicles.filter(v => v.reservations.some(r => r.type === 'LOCATION' && (r.dateFin && new Date(r.dateFin) > now))).length,
+      vendus: vehicles.filter(v => v.reservations.some(r => r.type === 'ACHAT' && r.status === 'ACCEPTED' && (!r.dateFin || new Date(r.dateFin) > now))).length,
+      enLocation: vehicles.filter(v => v.reservations.some(r => r.type === 'LOCATION' && r.status === 'ACCEPTED' && (r.dateFin && new Date(r.dateFin) > now))).length,
       disponibles: vehicles.filter(v => v.status === 'DISPONIBLE').length,
       enMaintenance: vehicles.filter(v => v.status === 'EN_MAINTENANCE').length,
       indisponibles: vehicles.filter(v => v.status === 'INDISPONIBLE').length,
@@ -996,18 +1025,18 @@ export const getParkingManagementData = async (req: AuthRequest, res: Response) 
         reservationsActives: vehicle.reservations.filter(r => {
           const dateDebut = r.dateDebut ? new Date(r.dateDebut) : null;
           const dateFin = r.dateFin ? new Date(r.dateFin) : null;
-          return dateDebut !== null && (
+          return r.status === 'ACCEPTED' && dateDebut !== null && (
             dateFin
               ? dateDebut <= now && dateFin >= now
               : dateDebut <= now
           );
         }).length
       },
-      nextReservation: vehicle.reservations[0] ? {
-        type: vehicle.reservations[0].type,
-        date: vehicle.reservations[0].dateDebut,
-        client: vehicle.reservations[0].user ? 
-          `${vehicle.reservations[0].user.prenom} ${vehicle.reservations[0].user.nom}` : 'Inconnu'
+      nextReservation: vehicle.reservations.find(r => r.status === 'ACCEPTED') ? {
+        type: vehicle.reservations.find(r => r.status === 'ACCEPTED')!.type,
+        date: vehicle.reservations.find(r => r.status === 'ACCEPTED')!.dateDebut,
+        client: vehicle.reservations.find(r => r.status === 'ACCEPTED')!.user ? 
+          `${vehicle.reservations.find(r => r.status === 'ACCEPTED')!.user!.prenom} ${vehicle.reservations.find(r => r.status === 'ACCEPTED')!.user!.nom}` : 'Inconnu'
       } : null
     }));
 

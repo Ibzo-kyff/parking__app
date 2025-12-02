@@ -64,7 +64,7 @@ const findOrCreateMarque = (marqueName) => __awaiter(void 0, void 0, void 0, fun
 const createVehicule = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a;
     try {
-        const { userOwnerId, parkingId, marque, model, year, prix, description, garantie, dureeGarantie, chauffeur, assurance, dureeAssurance, carteGrise, vignette, fuelType, mileage, forSale, forRent, } = req.body;
+        const { userOwnerId, parkingId, marque, model, year, prix, description, garantie, dureeGarantie, chauffeur, assurance, dureeAssurance, carteGrise, vignette, fuelType, mileage, forSale, forRent, transmission, } = req.body;
         // Validation des champs obligatoires
         if (!marque || !model || !prix) {
             return res.status(400).json({ error: 'Les champs marque, modèle et prix sont obligatoires.' });
@@ -104,6 +104,11 @@ const createVehicule = (req, res) => __awaiter(void 0, void 0, void 0, function*
             return res.status(400).json({ error: "La durée d'assurance est obligatoire si l'assurance est activée." });
         }
         const parsedMileage = mileage ? Number(mileage) : null;
+        // Validation de la transmission
+        const parsedTransmission = transmission ? transmission.toUpperCase() : 'MANUAL';
+        if (!['MANUAL', 'AUTOMATIC'].includes(parsedTransmission)) {
+            return res.status(400).json({ error: 'La transmission doit être MANUAL ou AUTOMATIC.' });
+        }
         // Gérer la marque avec la fonction utilitaire
         let marqueEntity;
         try {
@@ -146,6 +151,7 @@ const createVehicule = (req, res) => __awaiter(void 0, void 0, void 0, function*
                 vignette: parsedVignette,
                 forSale: parsedForSale,
                 forRent: parsedForRent,
+                transmission: parsedTransmission,
                 photos,
                 userOwnerId: userOwnerId ? Number(userOwnerId) : undefined,
                 parkingId: parkingId ? Number(parkingId) : undefined,
@@ -166,7 +172,7 @@ exports.createVehicule = createVehicule;
 const updateVehicule = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a;
     const { id } = req.params;
-    const { marque, model, year, prix, description, garantie, dureeGarantie, chauffeur, assurance, dureeAssurance, carteGrise, vignette, fuelType, mileage, status, forSale, forRent, } = req.body;
+    const { marque, model, year, prix, description, garantie, dureeGarantie, chauffeur, assurance, dureeAssurance, carteGrise, vignette, fuelType, mileage, status, forSale, forRent, transmission, } = req.body;
     try {
         // Vérifier si le véhicule existe
         const vehicule = yield prisma.vehicle.findUnique({ where: { id: parseInt(id) } });
@@ -211,6 +217,15 @@ const updateVehicule = (req, res) => __awaiter(void 0, void 0, void 0, function*
         // Gérer les booléens forSale et forRent si fournis
         const parsedForSale = forSale !== undefined ? forSale === 'true' : undefined;
         const parsedForRent = forRent !== undefined ? forRent === 'true' : undefined;
+        // Validation de la transmission si fournie
+        let parsedTransmission = undefined;
+        if (transmission) {
+            const upperTransmission = transmission.toUpperCase();
+            if (!['MANUAL', 'AUTOMATIC'].includes(upperTransmission)) {
+                return res.status(400).json({ error: 'La transmission doit être MANUAL ou AUTOMATIC.' });
+            }
+            parsedTransmission = upperTransmission;
+        }
         // Gérer les nouvelles photos
         let photos = vehicule.photos; // Garder les photos existantes par défaut
         const files = req.files;
@@ -258,6 +273,7 @@ const updateVehicule = (req, res) => __awaiter(void 0, void 0, void 0, function*
                 forSale: parsedForSale,
                 forRent: parsedForRent,
                 status,
+                transmission: parsedTransmission,
                 photos,
             },
         });
@@ -280,7 +296,7 @@ const updateVehicule = (req, res) => __awaiter(void 0, void 0, void 0, function*
 exports.updateVehicule = updateVehicule;
 // GET ALL VEHICULES WITH FILTERS
 const getAllVehicules = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    const { marque, model, minPrix, maxPrix, fuelType, maxMileage, withChauffeur, withGarantie, parkingId, userOwnerId, status, forSale, forRent, } = req.query;
+    const { marque, model, minPrix, maxPrix, fuelType, maxMileage, withChauffeur, withGarantie, parkingId, userOwnerId, status, forSale, forRent, transmission, } = req.query;
     try {
         const where = {};
         if (marque) {
@@ -322,6 +338,9 @@ const getAllVehicules = (req, res) => __awaiter(void 0, void 0, void 0, function
         }
         if (forRent !== undefined) {
             where.forRent = forRent === 'true';
+        }
+        if (transmission) {
+            where.transmission = transmission;
         }
         const vehicules = yield prisma.vehicle.findMany({
             where,
@@ -515,7 +534,8 @@ const getParkingUserVehicles = (req, res) => __awaiter(void 0, void 0, void 0, f
                         id: true,
                         type: true,
                         dateDebut: true,
-                        dateFin: true
+                        dateFin: true,
+                        status: true
                     }
                 },
                 marqueRef: true
@@ -529,8 +549,8 @@ const getParkingUserVehicles = (req, res) => __awaiter(void 0, void 0, void 0, f
         const now = new Date();
         const stats = {
             total: vehicles.length,
-            vendus: vehicles.filter(v => v.reservations.some(r => r.type === 'ACHAT' && (!r.dateFin || new Date(r.dateFin) > now))).length,
-            enLocation: vehicles.filter(v => v.reservations.some(r => r.type === 'LOCATION' && new Date(r.dateFin) > now)).length,
+            vendus: vehicles.filter(v => v.reservations.some(r => r.type === 'ACHAT' && r.status === 'ACCEPTED' && (!r.dateFin || new Date(r.dateFin) > now))).length,
+            enLocation: vehicles.filter(v => v.reservations.some(r => r.type === 'LOCATION' && r.status === 'ACCEPTED' && new Date(r.dateFin) > now)).length,
             disponibles: vehicles.filter(v => v.status === 'DISPONIBLE').length,
             enMaintenance: vehicles.filter(v => v.status === 'EN_MAINTENANCE').length,
             indisponibles: vehicles.filter(v => v.status === 'INDISPONIBLE').length,
@@ -545,7 +565,7 @@ const getParkingUserVehicles = (req, res) => __awaiter(void 0, void 0, void 0, f
                     vues: ((_a = vehicle.stats) === null || _a === void 0 ? void 0 : _a.vues) || 0,
                     reservations: ((_b = vehicle.stats) === null || _b === void 0 ? void 0 : _b.reservations) || 0,
                     favoris: vehicle.favorites.length,
-                    reservationsActives: vehicle.reservations.filter(r => (r.dateFin ? new Date(r.dateFin) > now : true)).length
+                    reservationsActives: vehicle.reservations.filter(r => r.status === 'ACCEPTED' && (r.dateFin ? new Date(r.dateFin) > now : true)).length
                 } }));
         });
         return res.json({
@@ -703,7 +723,7 @@ const getParkingUserVehicleById = (req, res) => __awaiter(void 0, void 0, void 0
                 vues: ((_a = vehicle.stats) === null || _a === void 0 ? void 0 : _a.vues) || 0,
                 reservations: ((_b = vehicle.stats) === null || _b === void 0 ? void 0 : _b.reservations) || 0,
                 favoris: vehicle.favorites.length,
-                reservationsActives: vehicle.reservations.filter(r => (r.dateFin ? new Date(r.dateFin) > now : true)).length,
+                reservationsActives: vehicle.reservations.filter(r => r.status === 'ACCEPTED' && (r.dateFin ? new Date(r.dateFin) > now : true)).length,
                 reservationsTotal: vehicle.reservations.length
             } });
         return res.json({
@@ -782,6 +802,7 @@ const getParkingManagementData = (req, res) => __awaiter(void 0, void 0, void 0,
                 },
                 reservations: {
                     where: {
+                        status: 'ACCEPTED',
                         dateFin: {
                             gte: new Date()
                         }
@@ -791,6 +812,7 @@ const getParkingManagementData = (req, res) => __awaiter(void 0, void 0, void 0,
                         type: true,
                         dateDebut: true,
                         dateFin: true,
+                        status: true,
                         user: {
                             select: {
                                 nom: true,
@@ -815,6 +837,7 @@ const getParkingManagementData = (req, res) => __awaiter(void 0, void 0, void 0,
         const monthlyReservations = yield prisma.reservation.groupBy({
             by: ['type', 'createdAt'],
             where: {
+                status: 'ACCEPTED',
                 vehicle: {
                     parkingId: parking.id
                 },
@@ -832,14 +855,14 @@ const getParkingManagementData = (req, res) => __awaiter(void 0, void 0, void 0,
             .filter(r => {
             const dateDebut = r.dateDebut ? new Date(r.dateDebut) : null;
             const dateFin = r.dateFin ? new Date(r.dateFin) : null;
-            return dateFin
+            return r.status === 'ACCEPTED' && dateFin
                 ? dateDebut !== null && dateDebut <= now && dateFin >= now
                 : dateDebut !== null && dateDebut <= now;
         });
         const stats = {
             total: vehicles.length,
-            vendus: vehicles.filter(v => v.reservations.some(r => r.type === 'ACHAT' && (!r.dateFin || new Date(r.dateFin) > now))).length,
-            enLocation: vehicles.filter(v => v.reservations.some(r => r.type === 'LOCATION' && (r.dateFin && new Date(r.dateFin) > now))).length,
+            vendus: vehicles.filter(v => v.reservations.some(r => r.type === 'ACHAT' && r.status === 'ACCEPTED' && (!r.dateFin || new Date(r.dateFin) > now))).length,
+            enLocation: vehicles.filter(v => v.reservations.some(r => r.type === 'LOCATION' && r.status === 'ACCEPTED' && (r.dateFin && new Date(r.dateFin) > now))).length,
             disponibles: vehicles.filter(v => v.status === 'DISPONIBLE').length,
             enMaintenance: vehicles.filter(v => v.status === 'EN_MAINTENANCE').length,
             indisponibles: vehicles.filter(v => v.status === 'INDISPONIBLE').length,
@@ -877,16 +900,16 @@ const getParkingManagementData = (req, res) => __awaiter(void 0, void 0, void 0,
                     reservationsActives: vehicle.reservations.filter(r => {
                         const dateDebut = r.dateDebut ? new Date(r.dateDebut) : null;
                         const dateFin = r.dateFin ? new Date(r.dateFin) : null;
-                        return dateDebut !== null && (dateFin
+                        return r.status === 'ACCEPTED' && dateDebut !== null && (dateFin
                             ? dateDebut <= now && dateFin >= now
                             : dateDebut <= now);
                     }).length
                 },
-                nextReservation: vehicle.reservations[0] ? {
-                    type: vehicle.reservations[0].type,
-                    date: vehicle.reservations[0].dateDebut,
-                    client: vehicle.reservations[0].user ?
-                        `${vehicle.reservations[0].user.prenom} ${vehicle.reservations[0].user.nom}` : 'Inconnu'
+                nextReservation: vehicle.reservations.find(r => r.status === 'ACCEPTED') ? {
+                    type: vehicle.reservations.find(r => r.status === 'ACCEPTED').type,
+                    date: vehicle.reservations.find(r => r.status === 'ACCEPTED').dateDebut,
+                    client: vehicle.reservations.find(r => r.status === 'ACCEPTED').user ?
+                        `${vehicle.reservations.find(r => r.status === 'ACCEPTED').user.prenom} ${vehicle.reservations.find(r => r.status === 'ACCEPTED').user.nom}` : 'Inconnu'
                 } : null
             });
         });

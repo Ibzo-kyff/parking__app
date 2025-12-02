@@ -7,6 +7,7 @@ import {
   cancelReservation,
   updateReservation,
   getAllReservationsForParking,
+  acceptReservation,
 } from '../controllers/reservationController';
 import { authenticateToken } from '../middleware/authMiddleware';
 
@@ -22,6 +23,7 @@ router.delete('/:id', cancelReservation);
 
 // --- PARKING ---
 router.get('/parking/all', getAllReservationsForParking);
+router.post('/:id/accept', acceptReservation);
 
 // Routes admin seulement
 router.get('/admin/all', getAllReservations);
