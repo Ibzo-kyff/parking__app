@@ -12,7 +12,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.deleteParking = exports.updateParking = exports.getParkingById = exports.getAllParkings = exports.createParking = void 0;
+exports.deleteParking = exports.updateParking = exports.getParkingById = exports.getMyParking = exports.getAllParkings = exports.createParking = void 0;
 const client_1 = require("@prisma/client");
 const blob_1 = require("@vercel/blob");
 const path_1 = __importDefault(require("path"));
@@ -21,6 +21,9 @@ const prisma = new client_1.PrismaClient();
 const createParking = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { userId, name, address, phone, email, city, description, capacity, hoursOfOperation, status, } = req.body;
     try {
+        if (!req.user || Number(userId) !== req.user.id) {
+            return res.status(403).json({ error: "Non autorisé" });
+        }
         const user = yield prisma.user.findUnique({ where: { id: Number(userId) } });
         if (!user || user.role !== client_1.Role.PARKING) {
             return res.status(400).json({ error: "Utilisateur invalide ou non autorisé à gérer un parking." });
@@ -82,6 +85,27 @@ const getAllParkings = (_req, res) => __awaiter(void 0, void 0, void 0, function
     }
 });
 exports.getAllParkings = getAllParkings;
+// GET MY PARKING
+const getMyParking = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        if (!req.user) {
+            return res.status(401).json({ error: 'Non authentifié' });
+        }
+        const parking = yield prisma.parking.findUnique({
+            where: { userId: req.user.id },
+            include: { user: true, vehicles: true }
+        });
+        if (!parking) {
+            return res.status(404).json({ error: 'Parking non trouvé' });
+        }
+        return res.json(parking);
+    }
+    catch (err) {
+        console.error(err);
+        return res.status(500).json({ error: 'Erreur lors de la récupération du parking', details: err.message });
+    }
+});
+exports.getMyParking = getMyParking;
 // GET PARKING BY ID (inchangé)
 const getParkingById = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { id } = req.params;
@@ -105,10 +129,16 @@ const updateParking = (req, res) => __awaiter(void 0, void 0, void 0, function* 
     const { id } = req.params;
     const { name, address, phone, city, email, description, capacity, hoursOfOperation, status } = req.body;
     try {
+        if (!req.user) {
+            return res.status(401).json({ error: 'Non authentifié' });
+        }
         // Vérifier si parking existe
         const parking = yield prisma.parking.findUnique({ where: { id: Number(id) } });
         if (!parking) {
             return res.status(404).json({ error: 'Parking non trouvé' });
+        }
+        if (parking.userId !== req.user.id) {
+            return res.status(403).json({ error: 'Non autorisé à modifier ce parking' });
         }
         let newLogo = parking.logo;
         if (req.file) {
@@ -158,8 +188,17 @@ exports.updateParking = updateParking;
 const deleteParking = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { id } = req.params;
     try {
+        if (!req.user) {
+            return res.status(401).json({ error: 'Non authentifié' });
+        }
         const parking = yield prisma.parking.findUnique({ where: { id: parseInt(id) } });
-        if (parking && parking.logo) {
+        if (!parking) {
+            return res.status(404).json({ error: 'Parking non trouvé' });
+        }
+        if (parking.userId !== req.user.id) {
+            return res.status(403).json({ error: 'Non autorisé à supprimer ce parking' });
+        }
+        if (parking.logo) {
             // Supprimer le logo du blob
             const url = new URL(parking.logo);
             yield (0, blob_1.del)(url.pathname.slice(1));

@@ -88,6 +88,7 @@ model Vehicle {
   year           Int?
   favorites      Favorite[]
   reservations   Reservation[]
+  transmission Transmission @default(MANUAL)
   marqueRef      Marque           @relation(fields: [marqueId], references: [id])
   parking        Parking?         @relation("ParkingVehicles", fields: [parkingId], references: [id])
   userOwner      User?            @relation("ClientVehicles", fields: [userOwnerId], references: [id])
@@ -108,6 +109,7 @@ model Reservation {
   commission Float?
   createdAt  DateTime        @default(now())
   updatedAt  DateTime        @updatedAt
+  status ReservationStatus @default(PENDING)
   user       User            @relation(fields: [userId], references: [id])
   vehicle    Vehicle         @relation(fields: [vehicleId], references: [id])
 }
@@ -222,4 +224,15 @@ enum NotificationType {
   SYSTEM
   ALERT
   PROMOTION
+}
+
+enum ReservationStatus {
+PENDING
+ACCEPTED
+CANCELED
+}
+
+enum Transmission {
+MANUAL
+AUTOMATIC
 }
