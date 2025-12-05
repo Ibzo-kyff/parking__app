@@ -4,10 +4,9 @@ import {
   getAllReservations,
   getUserReservations,
   getReservation,
-  cancelReservation,
   updateReservation,
   getAllReservationsForParking,
-  acceptReservation,
+  updateReservationStatus,
 } from '../controllers/reservationController';
 import { authenticateToken } from '../middleware/authMiddleware';
 
@@ -19,11 +18,10 @@ router.use(authenticateToken);
 router.post('/', createReservation);
 router.get('/', getUserReservations);
 router.get('/:id', getReservation);
-router.delete('/:id', cancelReservation);
+router.put('/:id/status', updateReservationStatus);
 
 // --- PARKING ---
 router.get('/parking/all', getAllReservationsForParking);
-router.post('/:id/accept', acceptReservation);
 
 // Routes admin seulement
 router.get('/admin/all', getAllReservations);

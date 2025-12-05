@@ -229,6 +229,7 @@ enum NotificationType {
 enum ReservationStatus {
 PENDING
 ACCEPTED
+REJECTED
 CANCELED
 }
 

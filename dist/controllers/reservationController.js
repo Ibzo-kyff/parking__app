@@ -9,7 +9,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.updateReservation = exports.cancelReservation = exports.getReservation = exports.getUserReservations = exports.getAllReservationsForParking = exports.getAllReservations = exports.acceptReservation = exports.createReservation = void 0;
+exports.updateReservation = exports.getReservation = exports.getUserReservations = exports.getAllReservationsForParking = exports.getAllReservations = exports.updateReservationStatus = exports.createReservation = void 0;
 const client_1 = require("@prisma/client");
 const zod_1 = require("zod");
 const sendNotification_1 = require("../utils/sendNotification");
@@ -109,65 +109,149 @@ const createReservation = (req, res) => __awaiter(void 0, void 0, void 0, functi
     }
 });
 exports.createReservation = createReservation;
-const acceptReservation = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f, _g, _h;
+const updateReservationStatus = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        if (!req.user || req.user.role !== 'PARKING')
-            return res.status(403).json({ message: 'Accès non autorisé' });
+        if (!req.user)
+            return res.status(401).json({ message: 'Non autorisé' });
         const { id } = req.params;
+        const { status, reason } = req.body;
+        // Validation du statut
+        const validStatuses = Object.values(client_1.ReservationStatus);
+        if (!status || !validStatuses.includes(status)) {
+            return res.status(400).json({
+                message: 'Statut invalide',
+                validStatuses
+            });
+        }
+        // Trouver la réservation
         const reservation = yield prisma.reservation.findUnique({
             where: { id: Number(id) },
-            include: { vehicle: { include: { marqueRef: true } } },
+            include: {
+                vehicle: {
+                    include: {
+                        marqueRef: true,
+                        parking: true
+                    }
+                },
+                user: true
+            },
         });
         if (!reservation)
             return res.status(404).json({ message: 'Réservation non trouvée' });
-        const parking = yield prisma.parking.findUnique({
-            where: { userId: req.user.id },
-        });
-        if (!parking || reservation.vehicle.parkingId !== parking.id)
-            return res.status(403).json({ message: 'Accès non autorisé' });
-        if (reservation.status !== client_1.ReservationStatus.PENDING)
-            return res.status(400).json({ message: 'Cette réservation n\'est pas en attente' });
-        // Revérifier les conflits pour LOCATION
-        if (reservation.type === client_1.ReservationType.LOCATION && reservation.dateDebut && reservation.dateFin) {
-            const conflict = yield prisma.reservation.findFirst({
-                where: {
-                    vehicleId: reservation.vehicleId,
-                    status: client_1.ReservationStatus.ACCEPTED,
-                    id: { not: reservation.id },
-                    OR: [
-                        {
-                            dateDebut: { lte: reservation.dateFin },
-                            dateFin: { gte: reservation.dateDebut },
-                        },
-                    ],
-                },
-            });
-            if (conflict)
-                return res.status(400).json({ message: 'Conflit de dates détecté' });
+        // Vérifier les permissions selon le rôle
+        let hasPermission = false;
+        if (req.user.role === 'ADMIN') {
+            hasPermission = true;
         }
+        else if (req.user.role === 'PARKING') {
+            const parking = yield prisma.parking.findUnique({
+                where: { userId: req.user.id },
+            });
+            hasPermission = parking != null && reservation.vehicle.parkingId === parking.id;
+        }
+        else if (req.user.role === 'CLIENT') {
+            hasPermission = reservation.userId === req.user.id;
+            // Les clients ne peuvent que cancel leurs propres réservations
+            if (hasPermission && status !== client_1.ReservationStatus.CANCELED) {
+                return res.status(403).json({ message: 'Vous ne pouvez qu\'annuler vos propres réservations' });
+            }
+        }
+        if (!hasPermission)
+            return res.status(403).json({ message: 'Accès non autorisé' });
+        // Logique de validation selon le statut
+        if (status === client_1.ReservationStatus.ACCEPTED) {
+            // Seul le parking peut accepter
+            if (req.user.role !== 'PARKING' && req.user.role !== 'ADMIN') {
+                return res.status(403).json({ message: 'Seul le parking peut accepter une réservation' });
+            }
+            if (reservation.status !== client_1.ReservationStatus.PENDING) {
+                return res.status(400).json({ message: 'Seules les réservations en attente peuvent être acceptées' });
+            }
+            // Vérifier les conflits de dates pour les locations
+            if (reservation.type === client_1.ReservationType.LOCATION && reservation.dateDebut && reservation.dateFin) {
+                const conflict = yield prisma.reservation.findFirst({
+                    where: {
+                        vehicleId: reservation.vehicleId,
+                        status: client_1.ReservationStatus.ACCEPTED,
+                        id: { not: reservation.id },
+                        OR: [
+                            {
+                                dateDebut: { lte: reservation.dateFin },
+                                dateFin: { gte: reservation.dateDebut },
+                            },
+                        ],
+                    },
+                });
+                if (conflict)
+                    return res.status(400).json({ message: 'Conflit de dates détecté' });
+            }
+        }
+        else if (status === client_1.ReservationStatus.CANCELED) {
+            // Vérifier les règles d'annulation
+            if (reservation.status === client_1.ReservationStatus.CANCELED) {
+                return res.status(400).json({ message: 'Cette réservation est déjà annulée' });
+            }
+            // Pour les locations, vérifier le délai de 24h
+            if (reservation.type === client_1.ReservationType.LOCATION && reservation.dateDebut) {
+                const now = new Date();
+                const minCancelTime = new Date(reservation.dateDebut);
+                minCancelTime.setDate(minCancelTime.getDate() - 1);
+                if (now > minCancelTime) {
+                    return res.status(400).json({
+                        message: 'Annulation impossible moins de 24h avant le début de la location',
+                        earliestCancelTime: minCancelTime
+                    });
+                }
+            }
+        }
+        else if (status === client_1.ReservationStatus.PENDING) {
+            return res.status(400).json({ message: 'Impossible de revenir au statut PENDING' });
+        }
+        // Mettre à jour la réservation
         const updatedReservation = yield prisma.reservation.update({
             where: { id: Number(id) },
-            data: { status: client_1.ReservationStatus.ACCEPTED },
-            include: { vehicle: { include: { marqueRef: true } }, user: true },
+            data: { status },
+            include: {
+                vehicle: { include: { marqueRef: true } },
+                user: true
+            },
         });
-        // Mettre à jour le statut du véhicule si ACHAT
+        // Gérer les effets secondaires
+        const wasAccepted = reservation.status === client_1.ReservationStatus.ACCEPTED;
+        const willBeAccepted = status === client_1.ReservationStatus.ACCEPTED;
+        // Mettre à jour le statut du véhicule pour les achats
         if (reservation.type === client_1.ReservationType.ACHAT) {
-            yield prisma.vehicle.update({
-                where: { id: reservation.vehicleId },
-                data: { status: client_1.VehicleStatus.INDISPONIBLE },
+            if (willBeAccepted) {
+                yield prisma.vehicle.update({
+                    where: { id: reservation.vehicleId },
+                    data: { status: client_1.VehicleStatus.INDISPONIBLE },
+                });
+            }
+            else if (wasAccepted && status !== client_1.ReservationStatus.ACCEPTED) {
+                yield prisma.vehicle.update({
+                    where: { id: reservation.vehicleId },
+                    data: { status: client_1.VehicleStatus.DISPONIBLE },
+                });
+            }
+        }
+        // Mettre à jour les statistiques
+        if (wasAccepted && !willBeAccepted) {
+            // Décrémenter si on passe d'ACCEPTED à autre chose
+            yield prisma.vehicleStats.update({
+                where: { vehicleId: reservation.vehicleId },
+                data: { reservations: { decrement: 1 } },
             });
         }
-        // Incrémenter les stats
-        yield prisma.vehicleStats.upsert({
-            where: { vehicleId: reservation.vehicleId },
-            update: { reservations: { increment: 1 } },
-            create: { vehicleId: reservation.vehicleId, reservations: 1 },
-        });
-        // Notifications
-        yield (0, sendNotification_1.notifyUser)(reservation.userId, 'Réservation acceptée', reservation.type === client_1.ReservationType.ACHAT
-            ? `Votre achat du véhicule ${(_b = (_a = reservation.vehicle.marqueRef) === null || _a === void 0 ? void 0 : _a.name) !== null && _b !== void 0 ? _b : 'Marque inconnue'} ${(_c = reservation.vehicle.model) !== null && _c !== void 0 ? _c : ''} a été accepté.`
-            : `Votre location du véhicule ${(_e = (_d = reservation.vehicle.marqueRef) === null || _d === void 0 ? void 0 : _d.name) !== null && _e !== void 0 ? _e : 'Marque inconnue'} ${(_f = reservation.vehicle.model) !== null && _f !== void 0 ? _f : ''} a été acceptée du ${(_g = reservation.dateDebut) === null || _g === void 0 ? void 0 : _g.toISOString()} au ${(_h = reservation.dateFin) === null || _h === void 0 ? void 0 : _h.toISOString()}.`, client_1.NotificationType.RESERVATION, { reservationId: reservation.id, vehicleId: reservation.vehicleId });
+        else if (!wasAccepted && willBeAccepted) {
+            // Incrémenter si on passe à ACCEPTED
+            yield prisma.vehicleStats.upsert({
+                where: { vehicleId: reservation.vehicleId },
+                update: { reservations: { increment: 1 } },
+                create: { vehicleId: reservation.vehicleId, reservations: 1 },
+            });
+        }
+        // Envoyer les notifications appropriées
+        yield sendStatusChangeNotification(reservation, status, reason, req.user.role);
         return res.json(updatedReservation);
     }
     catch (err) {
@@ -175,7 +259,46 @@ const acceptReservation = (req, res) => __awaiter(void 0, void 0, void 0, functi
         return res.status(500).json({ message: 'Erreur serveur' });
     }
 });
-exports.acceptReservation = acceptReservation;
+exports.updateReservationStatus = updateReservationStatus;
+// Fonction helper pour les notifications
+function sendStatusChangeNotification(reservation, newStatus, reason, changedByRole) {
+    return __awaiter(this, void 0, void 0, function* () {
+        var _a, _b, _c, _d, _e;
+        const vehicleName = `${(_b = (_a = reservation.vehicle.marqueRef) === null || _a === void 0 ? void 0 : _a.name) !== null && _b !== void 0 ? _b : 'Marque inconnue'} ${(_c = reservation.vehicle.model) !== null && _c !== void 0 ? _c : ''}`;
+        let title = '';
+        let message = '';
+        switch (newStatus) {
+            case client_1.ReservationStatus.ACCEPTED:
+                title = 'Réservation acceptée';
+                message = reservation.type === client_1.ReservationType.ACHAT
+                    ? `Votre achat du véhicule ${vehicleName} a été accepté.`
+                    : `Votre location du véhicule ${vehicleName} a été acceptée du ${(_d = reservation.dateDebut) === null || _d === void 0 ? void 0 : _d.toISOString()} au ${(_e = reservation.dateFin) === null || _e === void 0 ? void 0 : _e.toISOString()}.`;
+                break;
+            case client_1.ReservationStatus.CANCELED:
+                title = 'Réservation annulée';
+                const byWho = changedByRole === 'CLIENT' ? 'Vous avez annulé' : 'Votre réservation a été annulée';
+                message = `${byWho} pour le véhicule ${vehicleName}${reason ? ` : ${reason}` : ''}.`;
+                break;
+            default:
+                return;
+        }
+        // Notifier l'utilisateur
+        yield (0, sendNotification_1.notifyUser)(reservation.userId, title, message, client_1.NotificationType.RESERVATION, { reservationId: reservation.id, vehicleId: reservation.vehicleId });
+        // Notifier le parking si ce n'est pas lui qui a fait le changement
+        if (reservation.vehicle.parkingId && changedByRole !== 'PARKING') {
+            let parkingMessage = '';
+            switch (newStatus) {
+                case client_1.ReservationStatus.CANCELED:
+                    parkingMessage = `La réservation du véhicule ${vehicleName} a été annulée par ${changedByRole === 'CLIENT' ? 'le client' : 'l\'administrateur'}${reason ? ` : ${reason}` : ''}.`;
+                    break;
+                // Ajouter d'autres cas si nécessaire
+            }
+            if (parkingMessage) {
+                yield (0, sendNotification_1.notifyParkingOwner)(reservation.vehicle.parkingId, `Réservation ${newStatus.toLowerCase()}`, parkingMessage, client_1.NotificationType.RESERVATION, { reservationId: reservation.id });
+            }
+        }
+    });
+}
 const getAllReservations = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         if (!req.user || req.user.role !== 'ADMIN')
@@ -262,68 +385,6 @@ const getReservation = (req, res) => __awaiter(void 0, void 0, void 0, function*
     }
 });
 exports.getReservation = getReservation;
-const cancelReservation = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f;
-    try {
-        if (!req.user)
-            return res.status(401).json({ message: 'Non autorisé' });
-        const { id } = req.params;
-        const reservation = yield prisma.reservation.findUnique({
-            where: { id: Number(id) },
-            include: { vehicle: { include: { marqueRef: true } } },
-        });
-        if (!reservation)
-            return res.status(404).json({ message: 'Réservation non trouvée' });
-        if (req.user.role === 'CLIENT' && reservation.userId !== req.user.id)
-            return res.status(403).json({ message: 'Accès non autorisé' });
-        if (req.user.role === 'PARKING') {
-            const parking = yield prisma.parking.findUnique({
-                where: { userId: req.user.id },
-            });
-            if (!parking || reservation.vehicle.parkingId !== parking.id)
-                return res.status(403).json({ message: 'Accès non autorisé' });
-        }
-        if (reservation.status === client_1.ReservationStatus.CANCELED)
-            return res.status(400).json({ message: 'Cette réservation est déjà annulée' });
-        if (reservation.type === client_1.ReservationType.LOCATION && reservation.dateDebut) {
-            const now = new Date();
-            const minCancelTime = new Date(reservation.dateDebut);
-            minCancelTime.setDate(minCancelTime.getDate() - 1);
-            if (now > minCancelTime)
-                return res
-                    .status(400)
-                    .json({ message: 'Annulation impossible moins de 24h avant' });
-        }
-        const wasAccepted = reservation.status === client_1.ReservationStatus.ACCEPTED;
-        const updatedReservation = yield prisma.reservation.update({
-            where: { id: Number(id) },
-            data: { status: client_1.ReservationStatus.CANCELED },
-        });
-        if (wasAccepted && reservation.type === client_1.ReservationType.ACHAT) {
-            yield prisma.vehicle.update({
-                where: { id: reservation.vehicleId },
-                data: { status: client_1.VehicleStatus.DISPONIBLE },
-            });
-        }
-        if (wasAccepted) {
-            yield prisma.vehicleStats.update({
-                where: { vehicleId: reservation.vehicleId },
-                data: { reservations: { decrement: 1 } },
-            });
-        }
-        // Notifications
-        yield (0, sendNotification_1.notifyUser)(reservation.userId, 'Réservation annulée', `Votre réservation du véhicule ${(_b = (_a = reservation.vehicle.marqueRef) === null || _a === void 0 ? void 0 : _a.name) !== null && _b !== void 0 ? _b : 'Marque inconnue'} ${(_c = reservation.vehicle.model) !== null && _c !== void 0 ? _c : ''} a été annulée.`, client_1.NotificationType.RESERVATION, { reservationId: reservation.id });
-        if (reservation.vehicle.parkingId) {
-            yield (0, sendNotification_1.notifyParkingOwner)(reservation.vehicle.parkingId, 'Réservation annulée', `La réservation du véhicule ${(_e = (_d = reservation.vehicle.marqueRef) === null || _d === void 0 ? void 0 : _d.name) !== null && _e !== void 0 ? _e : 'Marque inconnue'} ${(_f = reservation.vehicle.model) !== null && _f !== void 0 ? _f : ''} a été annulée.`, client_1.NotificationType.RESERVATION, { reservationId: reservation.id });
-        }
-        return res.json({ message: 'Réservation annulée avec succès', reservation: updatedReservation });
-    }
-    catch (err) {
-        console.error(err);
-        return res.status(500).json({ message: 'Erreur serveur' });
-    }
-});
-exports.cancelReservation = cancelReservation;
 const updateReservation = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b, _c;
     try {
