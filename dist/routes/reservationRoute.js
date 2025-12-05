@@ -12,10 +12,9 @@ router.use(authMiddleware_1.authenticateToken);
 router.post('/', reservationController_1.createReservation);
 router.get('/', reservationController_1.getUserReservations);
 router.get('/:id', reservationController_1.getReservation);
-router.delete('/:id', reservationController_1.cancelReservation);
+router.put('/:id/status', reservationController_1.updateReservationStatus);
 // --- PARKING ---
 router.get('/parking/all', reservationController_1.getAllReservationsForParking);
-router.post('/:id/accept', reservationController_1.acceptReservation);
 // Routes admin seulement
 router.get('/admin/all', reservationController_1.getAllReservations);
 router.put('/admin/:id', reservationController_1.updateReservation);
