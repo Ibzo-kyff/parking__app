@@ -19,6 +19,7 @@ const upload = multer({ storage });
 
 router.post('/', upload.single("logo"), createParking);
 router.get('/', getAllParkings);
+router.get('/:id',getParkingById);
 router.get('/me',authenticateToken, getMyParking);
 router.put('/:id', authenticateToken,upload.single("logo"), updateParking);
 router.delete('/:id', deleteParking);
