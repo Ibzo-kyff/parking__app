@@ -14,8 +14,8 @@ const storage = multer_1.default.memoryStorage(); // Changement ici : pas de dis
 const upload = (0, multer_1.default)({ storage });
 router.post('/', upload.single("logo"), parkingController_1.createParking);
 router.get('/', parkingController_1.getAllParkings);
-router.get('/:id', parkingController_1.getParkingById);
 router.get('/me', authMiddleware_1.authenticateToken, parkingController_1.getMyParking);
+router.get('/:id', parkingController_1.getParkingById);
 router.put('/:id', authMiddleware_1.authenticateToken, upload.single("logo"), parkingController_1.updateParking);
 router.delete('/:id', parkingController_1.deleteParking);
 exports.default = router;
