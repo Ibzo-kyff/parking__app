@@ -20,6 +20,7 @@ router.post('/verify-reset-otp', authController_1.verifyResetOTP);
 // Routes pour la réinitialisation de mot de passe
 router.post('/forgot-password', authController_1.forgotPassword);
 router.post('/reset-password', authController_1.resetPassword);
+router.post('/users/push-token', authMiddleware_1.authenticateToken, authController_1.updatePushToken);
 // Routes de gestion des utilisateurs
 router.get('/users', authMiddleware_1.authenticateToken, authController_1.getAllUsers);
 router.get('/users/me', authMiddleware_1.authenticateToken, authController_1.getCurrentUser); // Ajout pour récupérer les infos de l'utilisateur connecté

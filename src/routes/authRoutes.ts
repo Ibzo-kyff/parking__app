@@ -13,6 +13,7 @@ import {
   getUserById,
   getCurrentUser,
   updateCurrentUser, 
+  updatePushToken,
   updateUser, 
   deleteUser 
 } from '../controllers/authController';
@@ -35,7 +36,7 @@ router.post('/verify-reset-otp', verifyResetOTP);
 // Routes pour la réinitialisation de mot de passe
 router.post('/forgot-password', forgotPassword);
 router.post('/reset-password', resetPassword);
-
+router.post('/users/push-token', authenticateToken, updatePushToken);
 // Routes de gestion des utilisateurs
 router.get('/users', authenticateToken, getAllUsers);
 router.get('/users/me', authenticateToken, getCurrentUser); // Ajout pour récupérer les infos de l'utilisateur connecté
