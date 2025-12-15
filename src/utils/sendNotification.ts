@@ -1,13 +1,11 @@
-// utils/sendNotification.ts
+// utils/sendNotification.ts - Version simplifiée
 import { PrismaClient, NotificationType } from '@prisma/client';
 import { Expo } from 'expo-server-sdk';
 
-// === Initialisation ===
 const prisma = new PrismaClient();
 const expo = new Expo({ accessToken: process.env.EXPO_ACCESS_TOKEN });
 
-// === Fonction privée d'envoi push (dupliquée ici pour éviter couplage) ===
-const sendPush = async (
+export const sendPushNotification = async (
   token: string | null | undefined,
   title: string,
   body: string,
@@ -29,15 +27,24 @@ const sendPush = async (
 
   try {
     const receipts = await expo.sendPushNotificationsAsync([message]);
-    console.log('Push envoyé:', { title, token, receipt: receipts[0] });
-    return receipts[0];
+    
+    // Nettoyage token périmé
+    const receipt = receipts[0];
+    if (receipt.status === 'error' && receipt.details?.error === 'DeviceNotRegistered') {
+      await prisma.user.updateMany({
+        where: { expoPushToken: token },
+        data: { expoPushToken: null },
+      });
+    }
+    
+    return receipt;
   } catch (error: any) {
     console.error('Erreur envoi push:', error.message);
     return null;
   }
 };
 
-// === NOTIFIER UN UTILISATEUR ===
+// === NOTIFIER UN UTILISATEUR (PUSH + BDD) ===
 export const notifyUser = async (
   userId: number,
   title: string,
@@ -46,40 +53,38 @@ export const notifyUser = async (
   data: Record<string, unknown> = {}
 ) => {
   try {
-    // Récupérer le token + créer la notif en parallèle
-    const [user, notification] = await Promise.all([
-      prisma.user.findUnique({
-        where: { id: userId },
-        select: { expoPushToken: true },
-      }),
-      prisma.notification.create({
-        data: {
-          title,
-          message,
-          type,
-          userId,
-        },
-      }),
-    ]);
+    // 1. Créer la notification en BDD (pour l'historique)
+    const notification = await prisma.notification.create({
+      data: {
+        title,
+        message,
+        type,
+        userId,
+      },
+    });
 
-    // Envoyer le push si token valide
+    // 2. Récupérer le token pour push
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { expoPushToken: true },
+    });
+
+    // 3. Envoyer push si token valide
     if (user?.expoPushToken) {
-      await sendPush(user.expoPushToken, title, message, {
+      await sendPushNotification(user.expoPushToken, title, message, {
         notificationId: notification.id,
         ...data,
       });
-    } else {
-      console.info('Aucun token Expo pour userId:', userId);
     }
 
     return notification;
   } catch (error: any) {
     console.error('Erreur notifyUser:', error);
-    throw new Error('Échec envoi notification utilisateur');
+    throw error;
   }
 };
 
-// === NOTIFIER LE PROPRIÉTAIRE D'UN PARKING ===
+// === NOTIFIER LE PROPRIÉTAIRE D'UN PARKING (PUSH + BDD) ===
 export const notifyParkingOwner = async (
   parkingId: number,
   title: string,
@@ -88,39 +93,36 @@ export const notifyParkingOwner = async (
   data: Record<string, unknown> = {}
 ) => {
   try {
-    const [parking, notification] = await Promise.all([
-      prisma.parking.findUnique({
-        where: { id: parkingId },
-        select: {
-          user: {
-            select: { expoPushToken: true },
-          },
-        },
-      }),
-      prisma.notification.create({
-        data: {
-          title,
-          message,
-          type,
-          parkingId,
-        },
-      }),
-    ]);
+    // 1. Récupérer l'utilisateur propriétaire
+    const parking = await prisma.parking.findUnique({
+      where: { id: parkingId },
+      include: { user: true },
+    });
 
-    const token = parking?.user?.expoPushToken;
+    if (!parking?.user) return null;
 
-    if (token) {
-      await sendPush(token, title, message, {
+    // 2. Créer la notification en BDD
+    const notification = await prisma.notification.create({
+      data: {
+        title,
+        message,
+        type,
+        parkingId,
+        userId: parking.user.id, // Associer aussi à l'utilisateur
+      },
+    });
+
+    // 3. Envoyer push si token valide
+    if (parking.user.expoPushToken) {
+      await sendPushNotification(parking.user.expoPushToken, title, message, {
         notificationId: notification.id,
         ...data,
       });
-    } else {
-      console.info('Aucun token pour le propriétaire du parking:', parkingId);
     }
 
     return notification;
   } catch (error: any) {
     console.error('Erreur notifyParkingOwner:', error);
-    throw new Error('Échec envoi notification parking');
+    throw error;
   }
 };

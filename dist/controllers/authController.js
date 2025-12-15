@@ -12,7 +12,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.deleteUser = exports.updateCurrentUser = exports.updateUser = exports.getCurrentUser = exports.getUserById = exports.getAllUsers = exports.verifyResetOTP = exports.resetPassword = exports.forgotPassword = exports.verifyEmailWithOTP = exports.sendVerificationEmail = exports.logout = exports.refreshTokenHandler = exports.login = exports.register = void 0;
+exports.deleteUser = exports.updateCurrentUser = exports.updatePushToken = exports.updateUser = exports.getCurrentUser = exports.getUserById = exports.getAllUsers = exports.verifyResetOTP = exports.resetPassword = exports.forgotPassword = exports.verifyEmailWithOTP = exports.sendVerificationEmail = exports.logout = exports.refreshTokenHandler = exports.login = exports.register = void 0;
 const client_1 = require("@prisma/client");
 const bcrypt_1 = __importDefault(require("bcrypt"));
 const zod_1 = require("zod");
@@ -626,6 +626,35 @@ const updateUser = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
     }
 });
 exports.updateUser = updateUser;
+const pushTokenSchema = zod_1.z.object({
+    token: zod_1.z.string().min(1, 'Token requis'),
+});
+// Endpoint POST /users/push-token pour enregistrer/mettre à jour le token Expo Push
+const updatePushToken = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        if (!req.user)
+            return res.status(401).json({ message: 'Non authentifié' });
+        const { token } = pushTokenSchema.parse(req.body);
+        // Mise à jour du token dans la table User (pour tout rôle : CLIENT, PARKING, ADMIN)
+        const updatedUser = yield prisma.user.update({
+            where: { id: req.user.id },
+            data: { expoPushToken: token },
+            select: { id: true, expoPushToken: true }, // Retourne l'essentiel pour confirmation
+        });
+        return res.status(200).json({
+            message: 'Token push enregistré avec succès',
+            userId: updatedUser.id,
+        });
+    }
+    catch (err) {
+        console.error('Erreur mise à jour token push:', err);
+        if (err instanceof zod_1.z.ZodError) {
+            return res.status(400).json({ message: 'Données invalides', errors: err.issues });
+        }
+        return res.status(500).json({ message: 'Erreur serveur', details: err instanceof Error ? err.message : 'Erreur inconnue' });
+    }
+});
+exports.updatePushToken = updatePushToken;
 const updateCurrentUser = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b;
     try {

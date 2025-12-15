@@ -680,6 +680,37 @@ export const updateUser = async (req: AuthRequest, res: Response) => {
   }
 };
 
+const pushTokenSchema = z.object({
+  token: z.string().min(1, 'Token requis'),
+});
+
+// Endpoint POST /users/push-token pour enregistrer/mettre à jour le token Expo Push
+export const updatePushToken = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) return res.status(401).json({ message: 'Non authentifié' });
+
+    const { token } = pushTokenSchema.parse(req.body);
+
+    // Mise à jour du token dans la table User (pour tout rôle : CLIENT, PARKING, ADMIN)
+    const updatedUser = await prisma.user.update({
+      where: { id: req.user.id },
+      data: { expoPushToken: token },
+      select: { id: true, expoPushToken: true }, // Retourne l'essentiel pour confirmation
+    });
+
+    return res.status(200).json({ 
+      message: 'Token push enregistré avec succès',
+      userId: updatedUser.id,
+    });
+  } catch (err: unknown) {
+    console.error('Erreur mise à jour token push:', err);
+    if (err instanceof z.ZodError) {
+      return res.status(400).json({ message: 'Données invalides', errors: err.issues });
+    }
+    return res.status(500).json({ message: 'Erreur serveur', details: err instanceof Error ? err.message : 'Erreur inconnue' });
+  }
+};
+
 export const updateCurrentUser = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
