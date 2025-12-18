@@ -23,25 +23,19 @@ const sendMessage = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
     var _a;
     try {
         const senderId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.id;
-        const { receiverId, content, parkingId } = req.body;
-        if (!senderId) {
+        const { receiverId, content, parkingId, clientTempId } = req.body;
+        if (!senderId)
             return res.status(401).json({ message: 'Utilisateur non authentifié' });
-        }
-        if (!receiverId || !(content === null || content === void 0 ? void 0 : content.trim())) {
+        if (!receiverId || !(content === null || content === void 0 ? void 0 : content.trim()))
             return res.status(400).json({ message: 'receiverId et content sont obligatoires' });
-        }
-        // Vérifier les rôles
         const [sender, receiver] = yield Promise.all([
             prisma.user.findUnique({ where: { id: senderId }, select: { role: true, nom: true, prenom: true } }),
             prisma.user.findUnique({ where: { id: receiverId }, select: { role: true } }),
         ]);
-        if (!sender || !receiver) {
+        if (!sender || !receiver)
             return res.status(404).json({ message: 'Utilisateur introuvable' });
-        }
-        if (sender.role === receiver.role) {
+        if (sender.role === receiver.role)
             return res.status(403).json({ message: 'Les messages doivent être entre client et parking' });
-        }
-        // Vérifier parkingId si fourni
         if (parkingId) {
             const parking = yield prisma.parking.findUnique({ where: { id: parkingId } });
             if (!parking)
@@ -51,10 +45,12 @@ const sendMessage = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
             data: { senderId, receiverId, content: content.trim(), parkingId },
             include: { sender: true, receiver: true, parking: true },
         });
-        // === NOTIFICATION EN TEMPS RÉEL (PUSHER) ===
-        yield index_1.pusher.trigger(`user_${receiverId}`, 'newMessage', message);
-        yield index_1.pusher.trigger(`user_${senderId}`, 'newMessage', message);
-        // === NOTIFICATION PUSH EXPO ===
+        // Compose payload including clientTempId (echo back to client — not persisted)
+        const payload = Object.assign(Object.assign({}, message), { clientTempId });
+        // Pusher -> envoie le même payload pour que le client puisse matcher
+        yield index_1.pusher.trigger(`user_${receiverId}`, 'newMessage', payload);
+        yield index_1.pusher.trigger(`user_${senderId}`, 'newMessage', payload);
+        // Push Expo (unchanged)
         const senderName = `${sender.nom || ''} ${sender.prenom || ''}`.trim() || 'Quelqu’un';
         yield (0, sendNotification_1.notifyUser)(receiverId, `Nouveau message de ${senderName}`, content.substring(0, 100), client_1.NotificationType.MESSAGE, {
             messageId: message.id,
@@ -62,7 +58,6 @@ const sendMessage = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
             screen: 'Chat',
             parkingId: parkingId || undefined,
         }).catch(err => console.error('Échec push Expo (message):', err.message));
-        // === NOTIFICATION EN BASE (optionnel, tu l’as déjà) ===
         yield prisma.notification.create({
             data: {
                 userId: receiverId,
@@ -71,7 +66,8 @@ const sendMessage = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
                 type: 'MESSAGE',
             },
         });
-        res.status(201).json(message);
+        // Renvoyer payload contenant clientTempId
+        res.status(201).json(payload);
     }
     catch (error) {
         console.error('Erreur sendMessage:', error);
