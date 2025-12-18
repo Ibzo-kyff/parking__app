@@ -280,29 +280,18 @@ interface AuthRequest extends Request {
 export const sendMessage = async (req: AuthRequest, res: Response) => {
   try {
     const senderId = req.user?.id;
-    const { receiverId, content, parkingId } = req.body;
+    const { receiverId, content, parkingId, clientTempId } = req.body;
 
-    if (!senderId) {
-      return res.status(401).json({ message: 'Utilisateur non authentifié' });
-    }
-    if (!receiverId || !content?.trim()) {
-      return res.status(400).json({ message: 'receiverId et content sont obligatoires' });
-    }
+    if (!senderId) return res.status(401).json({ message: 'Utilisateur non authentifié' });
+    if (!receiverId || !content?.trim()) return res.status(400).json({ message: 'receiverId et content sont obligatoires' });
 
-    // Vérifier les rôles
     const [sender, receiver] = await Promise.all([
       prisma.user.findUnique({ where: { id: senderId }, select: { role: true, nom: true, prenom: true } }),
       prisma.user.findUnique({ where: { id: receiverId }, select: { role: true } }),
     ]);
+    if (!sender || !receiver) return res.status(404).json({ message: 'Utilisateur introuvable' });
+    if (sender.role === receiver.role) return res.status(403).json({ message: 'Les messages doivent être entre client et parking' });
 
-    if (!sender || !receiver) {
-      return res.status(404).json({ message: 'Utilisateur introuvable' });
-    }
-    if (sender.role === receiver.role) {
-      return res.status(403).json({ message: 'Les messages doivent être entre client et parking' });
-    }
-
-    // Vérifier parkingId si fourni
     if (parkingId) {
       const parking = await prisma.parking.findUnique({ where: { id: parkingId } });
       if (!parking) return res.status(404).json({ message: 'Parking introuvable' });
@@ -313,11 +302,14 @@ export const sendMessage = async (req: AuthRequest, res: Response) => {
       include: { sender: true, receiver: true, parking: true },
     });
 
-    // === NOTIFICATION EN TEMPS RÉEL (PUSHER) ===
-    await pusher.trigger(`user_${receiverId}`, 'newMessage', message);
-    await pusher.trigger(`user_${senderId}`, 'newMessage', message);
+    // Compose payload including clientTempId (echo back to client — not persisted)
+    const payload = { ...message, clientTempId };
 
-    // === NOTIFICATION PUSH EXPO ===
+    // Pusher -> envoie le même payload pour que le client puisse matcher
+    await pusher.trigger(`user_${receiverId}`, 'newMessage', payload);
+    await pusher.trigger(`user_${senderId}`, 'newMessage', payload);
+
+    // Push Expo (unchanged)
     const senderName = `${sender.nom || ''} ${sender.prenom || ''}`.trim() || 'Quelqu’un';
     await notifyUser(
       receiverId,
@@ -332,7 +324,6 @@ export const sendMessage = async (req: AuthRequest, res: Response) => {
       }
     ).catch(err => console.error('Échec push Expo (message):', err.message));
 
-    // === NOTIFICATION EN BASE (optionnel, tu l’as déjà) ===
     await prisma.notification.create({
       data: {
         userId: receiverId,
@@ -342,7 +333,8 @@ export const sendMessage = async (req: AuthRequest, res: Response) => {
       },
     });
 
-    res.status(201).json(message);
+    // Renvoyer payload contenant clientTempId
+    res.status(201).json(payload);
   } catch (error: any) {
     console.error('Erreur sendMessage:', error);
     res.status(500).json({ message: 'Erreur lors de l’envoi du message' });
