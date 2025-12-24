@@ -41,22 +41,32 @@ export const createReservation = async (req: AuthRequest, res: Response) => {
     const startDate = dateDebut ? new Date(dateDebut) : null;
     const endDate = dateFin ? new Date(dateFin) : null;
 
+    // Validation des dates pour location
     if (
       type === ReservationType.LOCATION &&
       (!startDate || !endDate || startDate >= endDate)
     ) {
-      return res
-        .status(400)
-        .json({ message: 'La date de fin doit être après la date de début pour une location' });
+      return res.status(400).json({
+        message: 'La date de fin doit être après la date de début pour une location',
+      });
     }
 
+    // Récupérer le véhicule avec ses réservations
     const vehicle = await prisma.vehicle.findUnique({
       where: { id: vehicleId },
-      include: { reservations: true, marqueRef: true },
+      include: {
+        reservations: {
+          where: {
+            status: { in: [ReservationStatus.PENDING, ReservationStatus.ACCEPTED] },
+          },
+        },
+        marqueRef: true,
+      },
     });
 
     if (!vehicle) return res.status(404).json({ message: 'Véhicule non trouvé' });
 
+    // Vérifications de disponibilité générale
     if (type === ReservationType.ACHAT && !vehicle.forSale)
       return res.status(400).json({ message: "Ce véhicule n'est pas destiné à la vente" });
 
@@ -66,7 +76,22 @@ export const createReservation = async (req: AuthRequest, res: Response) => {
     if (vehicle.status !== VehicleStatus.DISPONIBLE)
       return res.status(400).json({ message: "Ce véhicule n'est pas disponible" });
 
-    // Vérifier les conflits de dates avec les réservations ACCEPTED
+    // === NOUVELLE VÉRIFICATION CRITIQUE POUR L'ACHAT ===
+    if (type === ReservationType.ACHAT) {
+      const existingPurchaseRequest = vehicle.reservations.find(
+        (r) => r.type === ReservationType.ACHAT
+      );
+
+      if (existingPurchaseRequest) {
+        return res.status(400).json({
+          message:
+            'Ce véhicule fait déjà l’objet d’une demande d’achat en cours. Vous ne pouvez pas en faire une autre tant que celle-ci n’est pas traitée.',
+        });
+      }
+    }
+    // ================================================
+
+    // Vérification des conflits de dates pour les locations (déjà présent, on le garde)
     if (type === ReservationType.LOCATION) {
       const conflict = await prisma.reservation.findFirst({
         where: {
@@ -103,13 +128,13 @@ export const createReservation = async (req: AuthRequest, res: Response) => {
       },
     });
 
-    // Notifications pour demande en attente
+    // Notifications (inchangées)
     await notifyUser(
       userId,
       'Demande de réservation envoyée',
       type === ReservationType.ACHAT
-        ? `Votre demande d'achat du véhicule ${vehicle.marqueRef?.name ?? 'Marque inconnue'} ${vehicle.model ?? ''} est en attente de confirmation.`
-        : `Votre demande de location du véhicule ${vehicle.marqueRef?.name ?? 'Marque inconnue'} ${vehicle.model ?? ''} du ${dateDebut} au ${dateFin} est en attente de confirmation.`,
+        ? `Votre demande d'achat du véhicule ${vehicle.marqueRef?.name ?? ''} ${vehicle.model} est en attente de confirmation.`
+        : `Votre demande de location du véhicule ${vehicle.marqueRef?.name ?? ''} ${vehicle.model} est en attente.`,
       NotificationType.RESERVATION,
       { reservationId: reservation.id, vehicleId }
     );
@@ -118,7 +143,7 @@ export const createReservation = async (req: AuthRequest, res: Response) => {
       await notifyParkingOwner(
         vehicle.parkingId,
         'Nouvelle demande de réservation',
-        `Un client a demandé une ${type.toLowerCase()} pour votre véhicule ${vehicle.marqueRef?.name ?? 'Marque inconnue'} ${vehicle.model ?? ''}.`,
+        `Nouvelle demande de ${type.toLowerCase()} pour le véhicule ${vehicle.marqueRef?.name ?? ''} ${vehicle.model}.`,
         NotificationType.RESERVATION,
         { reservationId: reservation.id, vehicleId }
       );
@@ -126,7 +151,7 @@ export const createReservation = async (req: AuthRequest, res: Response) => {
 
     return res.status(201).json(reservation);
   } catch (err) {
-    console.error(err);
+    console.error('Erreur création réservation:', err);
     if (err instanceof z.ZodError)
       return res.status(400).json({ message: 'Données invalides', errors: err.issues });
     return res.status(500).json({ message: 'Erreur serveur' });
