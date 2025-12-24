@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { PrismaClient, Role } from '@prisma/client';
+import { PrismaClient, Role, ReservationType, ReservationStatus } from '@prisma/client';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { put, del } from '@vercel/blob';
 
@@ -11,46 +11,37 @@ const findOrCreateMarque = async (marqueName: string) => {
     throw new Error('Le nom de la marque est invalide');
   }
 
-  // Normalisation plus robuste
   const normalizedMarque = marqueName
     .toLowerCase()
     .trim()
-    .replace(/\s+/g, ' ') // Remplacer les espaces multiples par un seul
-    .normalize('NFD') // Normaliser les caractères accentués
-    .replace(/[\u0300-\u036f]/g, ''); // Supprimer les diacritiques
+    .replace(/\s+/g, ' ')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
 
-  // Recherche avec différentes variantes pour éviter les doublons
   const existingMarque = await prisma.marque.findFirst({
     where: {
       OR: [
         { name: normalizedMarque },
         { name: { equals: marqueName, mode: 'insensitive' } },
-        { name: { equals: normalizedMarque, mode: 'insensitive' } }
-      ]
-    }
+        { name: { equals: normalizedMarque, mode: 'insensitive' } },
+      ],
+    },
   });
 
   if (existingMarque) {
     return existingMarque;
   }
 
-  // Création avec vérification de conflit
   try {
-    const newMarque = await prisma.marque.create({
-      data: { 
-        name: normalizedMarque 
-      },
+    return await prisma.marque.create({
+      data: { name: normalizedMarque },
     });
-    return newMarque;
   } catch (error: any) {
-    // En cas de conflit (doublon détecté par la base de données), on refait une recherche
     if (error.code === 'P2002') {
       const marque = await prisma.marque.findUnique({
-        where: { name: normalizedMarque }
+        where: { name: normalizedMarque },
       });
-      if (marque) {
-        return marque;
-      }
+      if (marque) return marque;
     }
     throw error;
   }
@@ -62,7 +53,7 @@ export const createVehicule = async (req: Request, res: Response) => {
     const {
       userOwnerId,
       parkingId,
-      marque, 
+      marque,
       model,
       year,
       prix,
@@ -81,80 +72,61 @@ export const createVehicule = async (req: Request, res: Response) => {
       transmission,
     } = req.body;
 
-    // Validation des champs obligatoires
     if (!marque || !model || !prix) {
       return res.status(400).json({ error: 'Les champs marque, modèle et prix sont obligatoires.' });
     }
 
-    // Validation de la marque
     if (typeof marque !== 'string' || marque.trim() === '') {
       return res.status(400).json({ error: 'La marque doit être une chaîne de caractères non vide.' });
     }
 
     if ((userOwnerId && parkingId) || (!userOwnerId && !parkingId)) {
       return res.status(400).json({
-        error: 'Un véhicule doit appartenir soit à un utilisateur (userOwnerId), soit à un parking (parkingId), mais pas aux deux ou aucun.',
+        error: 'Un véhicule doit appartenir soit à un utilisateur, soit à un parking.',
       });
     }
 
-    // Valider le format des champs booléens
-    const parsedGarantie = garantie === 'true' ? true : false;
-    const parsedChauffeur = chauffeur === 'true' ? true : false;
-    const parsedAssurance = assurance === 'true' ? true : false;
-    const parsedCarteGrise = carteGrise === 'true' ? true : false;
-    const parsedVignette = vignette === 'true' ? true : false;
+    const parsedGarantie = garantie === 'true';
+    const parsedChauffeur = chauffeur === 'true';
+    const parsedAssurance = assurance === 'true';
+    const parsedCarteGrise = carteGrise === 'true';
+    const parsedVignette = vignette === 'true';
     const parsedForSale = forSale !== undefined ? forSale === 'true' : true;
     const parsedForRent = forRent !== undefined ? forRent === 'true' : true;
 
-    // Valider le format des champs numériques
     const parsedPrix = Number(prix);
-    if (isNaN(parsedPrix)) {
-      return res.status(400).json({ error: 'Le prix doit être un nombre valide.' });
-    }
+    if (isNaN(parsedPrix)) return res.status(400).json({ error: 'Le prix doit être un nombre valide.' });
 
     const parsedYear = year ? Number(year) : null;
-    if (year && isNaN(parsedYear!)) {
-      return res.status(400).json({ error: "L'année doit être un nombre valide." });
-    }
+    if (year && isNaN(parsedYear!)) return res.status(400).json({ error: "L'année doit être un nombre valide." });
 
     const parsedDureeGarantie = dureeGarantie ? Number(dureeGarantie) : null;
-    if (parsedGarantie && !parsedDureeGarantie) {
+    if (parsedGarantie && parsedDureeGarantie === null) {
       return res.status(400).json({ error: 'La durée de garantie est obligatoire si la garantie est activée.' });
     }
 
     const parsedDureeAssurance = dureeAssurance ? Number(dureeAssurance) : null;
-    if (parsedAssurance && !parsedDureeAssurance) {
+    if (parsedAssurance && parsedDureeAssurance === null) {
       return res.status(400).json({ error: "La durée d'assurance est obligatoire si l'assurance est activée." });
     }
 
     const parsedMileage = mileage ? Number(mileage) : null;
 
-    // Validation de la transmission
     const parsedTransmission = transmission ? transmission.toUpperCase() : 'MANUAL';
     if (!['MANUAL', 'AUTOMATIC'].includes(parsedTransmission)) {
       return res.status(400).json({ error: 'La transmission doit être MANUAL ou AUTOMATIC.' });
     }
 
-    // Gérer la marque avec la fonction utilitaire
-    let marqueEntity;
-    try {
-      marqueEntity = await findOrCreateMarque(marque);
-    } catch (error: any) {
-      return res.status(400).json({ 
-        error: 'Erreur lors de la gestion de la marque',
-        details: error.message 
-      });
-    }
+    const marqueEntity = await findOrCreateMarque(marque);
 
-    // Uploader les photos vers Vercel Blob
     const files = req.files as Express.Multer.File[];
     const photos: string[] = [];
-    if (files && files.length > 0) {
+    if (files?.length > 0) {
       for (const file of files) {
-        const newFilename = `vehicles/${Date.now()}-${Math.round(Math.random() * 1e9)}${file.originalname ? file.originalname.match(/\.[0-9a-z]+$/i)?.[0] : '.jpg'}`;
+        const newFilename = `vehicles/${Date.now()}-${Math.round(Math.random() * 1e9)}${file.originalname.match(/\.[0-9a-z]+$/i)?.[0] || '.jpg'}`;
         const result = await put(newFilename, file.buffer, {
           access: 'public',
-          token: process.env.BLOB_READ_WRITE_TOKEN,
+          token: process.env.BLOB_READ_WRITE_TOKEN!,
         });
         photos.push(result.url);
       }
@@ -162,7 +134,7 @@ export const createVehicule = async (req: Request, res: Response) => {
 
     const vehicule = await prisma.vehicle.create({
       data: {
-        marqueId: marqueEntity.id, // Utiliser l'ID de la marque
+        marqueId: marqueEntity.id,
         model,
         year: parsedYear,
         prix: parsedPrix,
@@ -186,11 +158,11 @@ export const createVehicule = async (req: Request, res: Response) => {
     });
 
     return res.status(201).json({ message: 'Véhicule enregistré avec succès', vehicule });
-  } catch (err) {
-    console.error("Erreur lors de la création du véhicule :", err);
+  } catch (err: any) {
+    console.error('Erreur création véhicule:', err);
     return res.status(500).json({
-      error: "Erreur lors de la création du véhicule",
-      details: err instanceof Error ? err.message : "Erreur inconnue",
+      error: 'Erreur lors de la création du véhicule',
+      details: err.message || 'Erreur inconnue',
     });
   }
 };
@@ -198,113 +170,33 @@ export const createVehicule = async (req: Request, res: Response) => {
 // UPDATE VEHICULE
 export const updateVehicule = async (req: Request, res: Response) => {
   const { id } = req.params;
-  const {
-    marque,
-    model,
-    year,
-    prix,
-    description,
-    garantie,
-    dureeGarantie,
-    chauffeur,
-    assurance,
-    dureeAssurance,
-    carteGrise,
-    vignette,
-    fuelType,
-    mileage,
-    status,
-    forSale,
-    forRent,
-    transmission,
-  } = req.body;
+  const body = req.body;
 
   try {
-    // Vérifier si le véhicule existe
     const vehicule = await prisma.vehicle.findUnique({ where: { id: parseInt(id) } });
-    if (!vehicule) {
-      return res.status(404).json({ error: 'Véhicule non trouvé' });
+    if (!vehicule) return res.status(404).json({ error: 'Véhicule non trouvé' });
+
+    let marqueId = vehicule.marqueId;
+    if (body.marque) {
+      const marqueEntity = await findOrCreateMarque(body.marque);
+      marqueId = marqueEntity.id;
     }
 
-    // Valider les champs numériques si fournis
-    const parsedPrix = prix ? Number(prix) : undefined;
-    if (prix && parsedPrix !== undefined && isNaN(parsedPrix)) {
-      return res.status(400).json({ error: 'Le prix doit être un nombre valide.' });
-    }
-
-    const parsedYear = year ? Number(year) : undefined;
-    if (year && parsedYear !== undefined && isNaN(parsedYear)) {
-      return res.status(400).json({ error: "L'année doit être un nombre valide." });
-    }
-
-    const parsedDureeGarantie = dureeGarantie ? Number(dureeGarantie) : undefined;
-    if (garantie === 'true' && parsedDureeGarantie == null) {
-      return res.status(400).json({ error: 'La durée de garantie est obligatoire si la garantie est activée.' });
-    }
-
-    const parsedDureeAssurance = dureeAssurance ? Number(dureeAssurance) : undefined;
-    if (assurance === 'true' && parsedDureeAssurance == null) {
-      return res.status(400).json({ error: "La durée d'assurance est obligatoire si l'assurance est activée." });
-    }
-
-    const parsedMileage = mileage ? Number(mileage) : undefined;
-
-    // Gérer la marque si fournie avec la fonction utilitaire
-    let marqueId: number | undefined = undefined;
-    if (marque) {
-      if (typeof marque !== 'string' || marque.trim() === '') {
-        return res.status(400).json({ error: 'La marque doit être une chaîne de caractères non vide.' });
-      }
-      
-      try {
-        const marqueEntity = await findOrCreateMarque(marque);
-        marqueId = marqueEntity.id;
-      } catch (error: any) {
-        return res.status(400).json({ 
-          error: 'Erreur lors de la gestion de la marque',
-          details: error.message 
-        });
-      }
-    }
-
-    // Gérer les booléens forSale et forRent si fournis
-    const parsedForSale = forSale !== undefined ? forSale === 'true' : undefined;
-    const parsedForRent = forRent !== undefined ? forRent === 'true' : undefined;
-
-    // Validation de la transmission si fournie
-    let parsedTransmission: 'MANUAL' | 'AUTOMATIC' | undefined = undefined;
-    if (transmission) {
-      const upperTransmission = transmission.toUpperCase();
-      if (!['MANUAL', 'AUTOMATIC'].includes(upperTransmission)) {
-        return res.status(400).json({ error: 'La transmission doit être MANUAL ou AUTOMATIC.' });
-      }
-      parsedTransmission = upperTransmission as 'MANUAL' | 'AUTOMATIC';
-    }
-
-    // Gérer les nouvelles photos
-    let photos = vehicule.photos; // Garder les photos existantes par défaut
+    let photos = vehicule.photos;
     const files = req.files as Express.Multer.File[];
-    if (files && files.length > 0) {
-      // Supprimer les anciens blobs si existants
-      if (photos && photos.length > 0) {
+    if (files?.length > 0) {
+      if (photos.length > 0) {
         for (const photo of photos) {
           try {
             const url = new URL(photo);
             await del(url.pathname.slice(1));
-          } catch (error) {
-            console.warn(`Ancien blob non supprimé, URL invalide : ${photo}`);
-          }
+          } catch {}
         }
       }
-
-      // Uploader les nouvelles photos
       photos = [];
       for (const file of files) {
-        const newFilename = `vehicles/${Date.now()}-${Math.round(Math.random() * 1e9)}${file.originalname ? file.originalname.match(/\.[0-9a-z]+$/i)?.[0] : '.jpg'}`;
-        const result = await put(newFilename, file.buffer, {
-          access: 'public',
-          token: process.env.BLOB_READ_WRITE_TOKEN,
-        });
+        const newFilename = `vehicles/${Date.now()}-${Math.round(Math.random() * 1e9)}${file.originalname.match(/\.[0-9a-z]+$/i)?.[0] || '.jpg'}`;
+        const result = await put(newFilename, file.buffer, { access: 'public', token: process.env.BLOB_READ_WRITE_TOKEN! });
         photos.push(result.url);
       }
     }
@@ -312,119 +204,68 @@ export const updateVehicule = async (req: Request, res: Response) => {
     const updatedVehicule = await prisma.vehicle.update({
       where: { id: parseInt(id) },
       data: {
-        marqueId: marqueId !== undefined ? marqueId : vehicule.marqueId,
-        model,
-        year: parsedYear,
-        prix: parsedPrix,
-        description,
-        fuelType,
-        mileage: parsedMileage,
-        garantie: garantie === 'true' ? true : garantie === 'false' ? false : undefined,
-        dureeGarantie: parsedDureeGarantie,
-        chauffeur: chauffeur === 'true' ? true : chauffeur === 'false' ? false : undefined,
-        assurance: assurance === 'true' ? true : assurance === 'false' ? false : undefined,
-        dureeAssurance: parsedDureeAssurance,
-        carteGrise: carteGrise === 'true' ? true : carteGrise === 'false' ? false : undefined,
-        vignette: vignette === 'true' ? true : vignette === 'false' ? false : undefined,
-        forSale: parsedForSale,
-        forRent: parsedForRent,
-        status,
-        transmission: parsedTransmission,
+        marqueId,
+        model: body.model,
+        year: body.year ? Number(body.year) : undefined,
+        prix: body.prix ? Number(body.prix) : undefined,
+        description: body.description,
+        fuelType: body.fuelType,
+        mileage: body.mileage ? Number(body.mileage) : undefined,
+        garantie: body.garantie !== undefined ? body.garantie === 'true' : undefined,
+        dureeGarantie: body.dureeGarantie ? Number(body.dureeGarantie) : undefined,
+        chauffeur: body.chauffeur !== undefined ? body.chauffeur === 'true' : undefined,
+        assurance: body.assurance !== undefined ? body.assurance === 'true' : undefined,
+        dureeAssurance: body.dureeAssurance ? Number(body.dureeAssurance) : undefined,
+        carteGrise: body.carteGrise !== undefined ? body.carteGrise === 'true' : undefined,
+        vignette: body.vignette !== undefined ? body.vignette === 'true' : undefined,
+        forSale: body.forSale !== undefined ? body.forSale === 'true' : undefined,
+        forRent: body.forRent !== undefined ? body.forRent === 'true' : undefined,
+        status: body.status,
+        transmission: body.transmission ? (body.transmission.toUpperCase() as 'MANUAL' | 'AUTOMATIC') : undefined,
         photos,
       },
     });
 
     return res.json({ message: 'Véhicule mis à jour', vehicule: updatedVehicule });
   } catch (err: any) {
-    console.error('Erreur lors de la mise à jour du véhicule :', err);
-    if (err.code === 'P2002') {
-      return res.status(400).json({
-        error: 'Un doublon a été détecté.',
-        details: 'La marque existe déjà avec un nom similaire.',
-      });
-    }
-    return res.status(500).json({
-      error: 'Erreur lors de la mise à jour du véhicule',
-      details: err instanceof Error ? err.message : 'Erreur inconnue',
-    });
+    console.error('Erreur mise à jour véhicule:', err);
+    return res.status(500).json({ error: 'Erreur lors de la mise à jour', details: err.message });
   }
 };
 
-// GET ALL VEHICULES WITH FILTERS
+// GET ALL VEHICULES (PUBLIC) - Seulement les véhicules disponibles à l'achat
 export const getAllVehicules = async (req: Request, res: Response) => {
-  const {
-    marque,
-    model,
-    minPrix,
-    maxPrix,
-    fuelType,
-    maxMileage,
-    withChauffeur,
-    withGarantie,
-    parkingId,
-    userOwnerId,
-    status,
-    forSale,
-    forRent,
-    transmission,
-  } = req.query;
+  const query = req.query;
 
   try {
-    const where: any = {};
+    const where: any = {
+      NOT: {
+        reservations: {
+          some: {
+            type: ReservationType.ACHAT,
+            status: { in: [ReservationStatus.PENDING, ReservationStatus.ACCEPTED] },
+          },
+        },
+      },
+      forSale: true,
+    };
 
-    if (marque) {
-      where.marqueRef = { name: { contains: marque as string, mode: 'insensitive' } };
-    }
-
-    if (model) {
-      where.model = { contains: model as string, mode: 'insensitive' };
-    }
-
-    if (minPrix || maxPrix) {
+    if (query.marque) where.marqueRef = { name: { contains: query.marque as string, mode: 'insensitive' } };
+    if (query.model) where.model = { contains: query.model as string, mode: 'insensitive' };
+    if (query.minPrix || query.maxPrix) {
       where.prix = {};
-      if (minPrix) where.prix.gte = Number(minPrix);
-      if (maxPrix) where.prix.lte = Number(maxPrix);
+      if (query.minPrix) where.prix.gte = Number(query.minPrix);
+      if (query.maxPrix) where.prix.lte = Number(query.maxPrix);
     }
-
-    if (fuelType) {
-      where.fuelType = fuelType as string;
-    }
-
-    if (maxMileage) {
-      where.mileage = { lte: Number(maxMileage) };
-    }
-
-    if (withChauffeur !== undefined) {
-      where.chauffeur = withChauffeur === 'true';
-    }
-
-    if (withGarantie !== undefined) {
-      where.garantie = withGarantie === 'true';
-    }
-
-    if (parkingId) {
-      where.parkingId = Number(parkingId);
-    }
-
-    if (userOwnerId) {
-      where.userOwnerId = Number(userOwnerId);
-    }
-
-    if (status) {
-      where.status = status as string;
-    }
-
-    if (forSale !== undefined) {
-      where.forSale = forSale === 'true';
-    }
-
-    if (forRent !== undefined) {
-      where.forRent = forRent === 'true';
-    }
-
-    if (transmission) {
-      where.transmission = transmission as string;
-    }
+    if (query.fuelType) where.fuelType = query.fuelType as string;
+    if (query.maxMileage) where.mileage = { lte: Number(query.maxMileage) };
+    if (query.withChauffeur !== undefined) where.chauffeur = query.withChauffeur === 'true';
+    if (query.withGarantie !== undefined) where.garantie = query.withGarantie === 'true';
+    if (query.parkingId) where.parkingId = Number(query.parkingId);
+    if (query.userOwnerId) where.userOwnerId = Number(query.userOwnerId);
+    if (query.status) where.status = query.status as string;
+    if (query.forRent !== undefined) where.forRent = query.forRent === 'true';
+    if (query.transmission) where.transmission = query.transmission as string;
 
     const vehicules = await prisma.vehicle.findMany({
       where,
@@ -433,20 +274,77 @@ export const getAllVehicules = async (req: Request, res: Response) => {
         userOwner: true,
         stats: true,
         favorites: true,
-        marqueRef: true
-      }
+        marqueRef: true,
+      },
     });
 
     return res.json(vehicules);
   } catch (err) {
+    console.error('Erreur getAllVehicules:', err);
     return res.status(500).json({ error: 'Erreur lors de la récupération des véhicules' });
+  }
+};
+
+// GET ALL VEHICULES FOR ADMIN - Tous les véhicules sans restriction
+export const getAllVehiculesAdmin = async (req: AuthRequest, res: Response) => {
+  if (!req.user || req.user.role !== Role.ADMIN) {
+    return res.status(403).json({ message: 'Accès refusé. Réservé aux administrateurs.' });
+  }
+
+  const query = req.query;
+
+  try {
+    const where: any = {};
+
+    if (query.marque) where.marqueRef = { name: { contains: query.marque as string, mode: 'insensitive' } };
+    if (query.model) where.model = { contains: query.model as string, mode: 'insensitive' };
+    if (query.minPrix || query.maxPrix) {
+      where.prix = {};
+      if (query.minPrix) where.prix.gte = Number(query.minPrix);
+      if (query.maxPrix) where.prix.lte = Number(query.maxPrix);
+    }
+    if (query.fuelType) where.fuelType = query.fuelType as string;
+    if (query.maxMileage) where.mileage = { lte: Number(query.maxMileage) };
+    if (query.withChauffeur !== undefined) where.chauffeur = query.withChauffeur === 'true';
+    if (query.withGarantie !== undefined) where.garantie = query.withGarantie === 'true';
+    if (query.parkingId) where.parkingId = Number(query.parkingId);
+    if (query.userOwnerId) where.userOwnerId = Number(query.userOwnerId);
+    if (query.status) where.status = query.status as string;
+    if (query.forSale !== undefined) where.forSale = query.forSale === 'true';
+    if (query.forRent !== undefined) where.forRent = query.forRent === 'true';
+    if (query.transmission) where.transmission = query.transmission as string;
+
+    const vehicules = await prisma.vehicle.findMany({
+      where,
+      include: {
+        parking: true,
+        userOwner: true,
+        stats: true,
+        favorites: true,
+        marqueRef: true,
+        reservations: {
+          select: {
+            id: true,
+            type: true,
+            status: true,
+            user: { select: { nom: true, prenom: true, email: true } },
+            createdAt: true,
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return res.json(vehicules);
+  } catch (err) {
+    console.error('Erreur getAllVehiculesAdmin:', err);
+    return res.status(500).json({ error: 'Erreur lors de la récupération des véhicules (admin)' });
   }
 };
 
 // GET VEHICULE BY ID
 export const getVehiculeById = async (req: Request, res: Response) => {
   const { id } = req.params;
-
   try {
     const vehicule = await prisma.vehicle.findUnique({
       where: { id: parseInt(id) },
@@ -455,14 +353,10 @@ export const getVehiculeById = async (req: Request, res: Response) => {
         userOwner: true,
         stats: true,
         favorites: true,
-        marqueRef: true
-      }
+        marqueRef: true,
+      },
     });
-
-    if (!vehicule) {
-      return res.status(404).json({ error: 'Véhicule non trouvé' });
-    }
-
+    if (!vehicule) return res.status(404).json({ error: 'Véhicule non trouvé' });
     return res.json(vehicule);
   } catch (err) {
     return res.status(500).json({ error: 'Erreur lors de la récupération du véhicule' });
@@ -473,54 +367,32 @@ export const getVehiculeById = async (req: Request, res: Response) => {
 export const deleteVehicule = async (req: Request, res: Response) => {
   const { id } = req.params;
   const vehiculeId = parseInt(id, 10);
-
-  if (isNaN(vehiculeId)) {
-    return res.status(400).json({ error: 'ID invalide' });
-  }
+  if (isNaN(vehiculeId)) return res.status(400).json({ error: 'ID invalide' });
 
   try {
-    // Vérifier si le véhicule existe et récupérer les photos
     const vehicule = await prisma.vehicle.findUnique({ where: { id: vehiculeId }, select: { photos: true } });
-    if (!vehicule) {
-      return res.status(404).json({ error: 'Véhicule introuvable' });
-    }
+    if (!vehicule) return res.status(404).json({ error: 'Véhicule introuvable' });
 
-    // Supprimer les blobs associés aux photos
-    if (vehicule.photos && vehicule.photos.length > 0) {
+    if (vehicule.photos.length > 0) {
       for (const photo of vehicule.photos) {
         try {
           const url = new URL(photo);
           await del(url.pathname.slice(1));
-        } catch (error) {
-          console.warn(`Ancien blob non supprimé, URL invalide : ${photo}`);
-        }
+        } catch {}
       }
     }
 
-    // Supprimer les dépendances
     await prisma.reservation.deleteMany({ where: { vehicleId: vehiculeId } });
     await prisma.vehicleHistory.deleteMany({ where: { vehicleId: vehiculeId } });
     await prisma.favorite.deleteMany({ where: { vehicleId: vehiculeId } });
     await prisma.vehicleStats.deleteMany({ where: { vehicleId: vehiculeId } });
 
-    // Puis supprimer le véhicule
-    await prisma.vehicle.delete({
-      where: { id: vehiculeId },
-    });
+    await prisma.vehicle.delete({ where: { id: vehiculeId } });
 
     return res.json({ message: 'Véhicule supprimé avec succès' });
   } catch (err: any) {
-    console.error('Erreur suppression véhicule:', err);
-    if (err.code === 'P2025') {
-      return res.status(404).json({ error: 'Véhicule introuvable' });
-    }
-    if (err.code === 'P2003') {
-      return res.status(400).json({ error: 'Impossible de supprimer : véhicule lié à d’autres données' });
-    }
-    return res.status(500).json({
-      error: 'Erreur lors de la suppression du véhicule',
-      details: err.message || 'Erreur inconnue',
-    });
+    console.error('Erreur suppression:', err);
+    return res.status(500).json({ error: 'Erreur lors de la suppression', details: err.message });
   }
 };
 

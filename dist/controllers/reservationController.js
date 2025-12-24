@@ -32,7 +32,7 @@ const reservationSchema = zod_1.z
     message: 'Les dates de début et de fin sont requises pour une location et doivent être valides',
 });
 const createReservation = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j;
+    var _a, _b, _c, _d, _e, _f;
     try {
         if (!req.user)
             return res.status(401).json({ message: 'Non autorisé' });
@@ -41,25 +41,45 @@ const createReservation = (req, res) => __awaiter(void 0, void 0, void 0, functi
         const userId = req.user.id;
         const startDate = dateDebut ? new Date(dateDebut) : null;
         const endDate = dateFin ? new Date(dateFin) : null;
+        // Validation des dates pour location
         if (type === client_1.ReservationType.LOCATION &&
             (!startDate || !endDate || startDate >= endDate)) {
-            return res
-                .status(400)
-                .json({ message: 'La date de fin doit être après la date de début pour une location' });
+            return res.status(400).json({
+                message: 'La date de fin doit être après la date de début pour une location',
+            });
         }
+        // Récupérer le véhicule avec ses réservations
         const vehicle = yield prisma.vehicle.findUnique({
             where: { id: vehicleId },
-            include: { reservations: true, marqueRef: true },
+            include: {
+                reservations: {
+                    where: {
+                        status: { in: [client_1.ReservationStatus.PENDING, client_1.ReservationStatus.ACCEPTED] },
+                    },
+                },
+                marqueRef: true,
+            },
         });
         if (!vehicle)
             return res.status(404).json({ message: 'Véhicule non trouvé' });
+        // Vérifications de disponibilité générale
         if (type === client_1.ReservationType.ACHAT && !vehicle.forSale)
             return res.status(400).json({ message: "Ce véhicule n'est pas destiné à la vente" });
         if (type === client_1.ReservationType.LOCATION && !vehicle.forRent)
             return res.status(400).json({ message: "Ce véhicule n'est pas destiné à la location" });
         if (vehicle.status !== client_1.VehicleStatus.DISPONIBLE)
             return res.status(400).json({ message: "Ce véhicule n'est pas disponible" });
-        // Vérifier les conflits de dates avec les réservations ACCEPTED
+        // === NOUVELLE VÉRIFICATION CRITIQUE POUR L'ACHAT ===
+        if (type === client_1.ReservationType.ACHAT) {
+            const existingPurchaseRequest = vehicle.reservations.find((r) => r.type === client_1.ReservationType.ACHAT);
+            if (existingPurchaseRequest) {
+                return res.status(400).json({
+                    message: 'Ce véhicule fait déjà l’objet d’une demande d’achat en cours. Vous ne pouvez pas en faire une autre tant que celle-ci n’est pas traitée.',
+                });
+            }
+        }
+        // ================================================
+        // Vérification des conflits de dates pour les locations (déjà présent, on le garde)
         if (type === client_1.ReservationType.LOCATION) {
             const conflict = yield prisma.reservation.findFirst({
                 where: {
@@ -92,17 +112,17 @@ const createReservation = (req, res) => __awaiter(void 0, void 0, void 0, functi
                 user: true,
             },
         });
-        // Notifications pour demande en attente
+        // Notifications (inchangées)
         yield (0, sendNotification_1.notifyUser)(userId, 'Demande de réservation envoyée', type === client_1.ReservationType.ACHAT
-            ? `Votre demande d'achat du véhicule ${(_b = (_a = vehicle.marqueRef) === null || _a === void 0 ? void 0 : _a.name) !== null && _b !== void 0 ? _b : 'Marque inconnue'} ${(_c = vehicle.model) !== null && _c !== void 0 ? _c : ''} est en attente de confirmation.`
-            : `Votre demande de location du véhicule ${(_e = (_d = vehicle.marqueRef) === null || _d === void 0 ? void 0 : _d.name) !== null && _e !== void 0 ? _e : 'Marque inconnue'} ${(_f = vehicle.model) !== null && _f !== void 0 ? _f : ''} du ${dateDebut} au ${dateFin} est en attente de confirmation.`, client_1.NotificationType.RESERVATION, { reservationId: reservation.id, vehicleId });
+            ? `Votre demande d'achat du véhicule ${(_b = (_a = vehicle.marqueRef) === null || _a === void 0 ? void 0 : _a.name) !== null && _b !== void 0 ? _b : ''} ${vehicle.model} est en attente de confirmation.`
+            : `Votre demande de location du véhicule ${(_d = (_c = vehicle.marqueRef) === null || _c === void 0 ? void 0 : _c.name) !== null && _d !== void 0 ? _d : ''} ${vehicle.model} est en attente.`, client_1.NotificationType.RESERVATION, { reservationId: reservation.id, vehicleId });
         if (vehicle.parkingId) {
-            yield (0, sendNotification_1.notifyParkingOwner)(vehicle.parkingId, 'Nouvelle demande de réservation', `Un client a demandé une ${type.toLowerCase()} pour votre véhicule ${(_h = (_g = vehicle.marqueRef) === null || _g === void 0 ? void 0 : _g.name) !== null && _h !== void 0 ? _h : 'Marque inconnue'} ${(_j = vehicle.model) !== null && _j !== void 0 ? _j : ''}.`, client_1.NotificationType.RESERVATION, { reservationId: reservation.id, vehicleId });
+            yield (0, sendNotification_1.notifyParkingOwner)(vehicle.parkingId, 'Nouvelle demande de réservation', `Nouvelle demande de ${type.toLowerCase()} pour le véhicule ${(_f = (_e = vehicle.marqueRef) === null || _e === void 0 ? void 0 : _e.name) !== null && _f !== void 0 ? _f : ''} ${vehicle.model}.`, client_1.NotificationType.RESERVATION, { reservationId: reservation.id, vehicleId });
         }
         return res.status(201).json(reservation);
     }
     catch (err) {
-        console.error(err);
+        console.error('Erreur création réservation:', err);
         if (err instanceof zod_1.z.ZodError)
             return res.status(400).json({ message: 'Données invalides', errors: err.issues });
         return res.status(500).json({ message: 'Erreur serveur' });

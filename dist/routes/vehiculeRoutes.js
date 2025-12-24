@@ -21,6 +21,7 @@ router.get('/parking/stats', authMiddleware_1.authenticateToken, vehiculeControl
 // Routes générales ensuite
 router.post('/', upload.array('photos'), vehiculeController_1.createVehicule);
 router.get('/', vehiculeController_1.getAllVehicules);
+router.get('/admin', authMiddleware_1.authenticateToken, vehiculeController_1.getAllVehiculesAdmin);
 // Routes paramétrées en dernier
 router.get('/parking/management', authMiddleware_1.authenticateToken, vehiculeController_1.getParkingManagementData);
 router.get('/:id', vehiculeController_1.getVehiculeById);

@@ -9,7 +9,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.addVehicleView = exports.getParkingManagementData = exports.getParkingUserVehicleById = exports.getParkingStats = exports.getParkingUserVehicles = exports.getRecentParkings = exports.getDistinctModels = exports.getDistinctMarques = exports.deleteVehicule = exports.getVehiculeById = exports.getAllVehicules = exports.updateVehicule = exports.createVehicule = void 0;
+exports.addVehicleView = exports.getParkingManagementData = exports.getParkingUserVehicleById = exports.getParkingStats = exports.getParkingUserVehicles = exports.getRecentParkings = exports.getDistinctModels = exports.getDistinctMarques = exports.deleteVehicule = exports.getVehiculeById = exports.getAllVehiculesAdmin = exports.getAllVehicules = exports.updateVehicule = exports.createVehicule = void 0;
 const client_1 = require("@prisma/client");
 const blob_1 = require("@vercel/blob");
 const prisma = new client_1.PrismaClient();
@@ -18,44 +18,36 @@ const findOrCreateMarque = (marqueName) => __awaiter(void 0, void 0, void 0, fun
     if (!marqueName || typeof marqueName !== 'string' || marqueName.trim() === '') {
         throw new Error('Le nom de la marque est invalide');
     }
-    // Normalisation plus robuste
     const normalizedMarque = marqueName
         .toLowerCase()
         .trim()
-        .replace(/\s+/g, ' ') // Remplacer les espaces multiples par un seul
-        .normalize('NFD') // Normaliser les caractères accentués
-        .replace(/[\u0300-\u036f]/g, ''); // Supprimer les diacritiques
-    // Recherche avec différentes variantes pour éviter les doublons
+        .replace(/\s+/g, ' ')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '');
     const existingMarque = yield prisma.marque.findFirst({
         where: {
             OR: [
                 { name: normalizedMarque },
                 { name: { equals: marqueName, mode: 'insensitive' } },
-                { name: { equals: normalizedMarque, mode: 'insensitive' } }
-            ]
-        }
+                { name: { equals: normalizedMarque, mode: 'insensitive' } },
+            ],
+        },
     });
     if (existingMarque) {
         return existingMarque;
     }
-    // Création avec vérification de conflit
     try {
-        const newMarque = yield prisma.marque.create({
-            data: {
-                name: normalizedMarque
-            },
+        return yield prisma.marque.create({
+            data: { name: normalizedMarque },
         });
-        return newMarque;
     }
     catch (error) {
-        // En cas de conflit (doublon détecté par la base de données), on refait une recherche
         if (error.code === 'P2002') {
             const marque = yield prisma.marque.findUnique({
-                where: { name: normalizedMarque }
+                where: { name: normalizedMarque },
             });
-            if (marque) {
+            if (marque)
                 return marque;
-            }
         }
         throw error;
     }
@@ -65,67 +57,49 @@ const createVehicule = (req, res) => __awaiter(void 0, void 0, void 0, function*
     var _a;
     try {
         const { userOwnerId, parkingId, marque, model, year, prix, description, garantie, dureeGarantie, chauffeur, assurance, dureeAssurance, carteGrise, vignette, fuelType, mileage, forSale, forRent, transmission, } = req.body;
-        // Validation des champs obligatoires
         if (!marque || !model || !prix) {
             return res.status(400).json({ error: 'Les champs marque, modèle et prix sont obligatoires.' });
         }
-        // Validation de la marque
         if (typeof marque !== 'string' || marque.trim() === '') {
             return res.status(400).json({ error: 'La marque doit être une chaîne de caractères non vide.' });
         }
         if ((userOwnerId && parkingId) || (!userOwnerId && !parkingId)) {
             return res.status(400).json({
-                error: 'Un véhicule doit appartenir soit à un utilisateur (userOwnerId), soit à un parking (parkingId), mais pas aux deux ou aucun.',
+                error: 'Un véhicule doit appartenir soit à un utilisateur, soit à un parking.',
             });
         }
-        // Valider le format des champs booléens
-        const parsedGarantie = garantie === 'true' ? true : false;
-        const parsedChauffeur = chauffeur === 'true' ? true : false;
-        const parsedAssurance = assurance === 'true' ? true : false;
-        const parsedCarteGrise = carteGrise === 'true' ? true : false;
-        const parsedVignette = vignette === 'true' ? true : false;
+        const parsedGarantie = garantie === 'true';
+        const parsedChauffeur = chauffeur === 'true';
+        const parsedAssurance = assurance === 'true';
+        const parsedCarteGrise = carteGrise === 'true';
+        const parsedVignette = vignette === 'true';
         const parsedForSale = forSale !== undefined ? forSale === 'true' : true;
         const parsedForRent = forRent !== undefined ? forRent === 'true' : true;
-        // Valider le format des champs numériques
         const parsedPrix = Number(prix);
-        if (isNaN(parsedPrix)) {
+        if (isNaN(parsedPrix))
             return res.status(400).json({ error: 'Le prix doit être un nombre valide.' });
-        }
         const parsedYear = year ? Number(year) : null;
-        if (year && isNaN(parsedYear)) {
+        if (year && isNaN(parsedYear))
             return res.status(400).json({ error: "L'année doit être un nombre valide." });
-        }
         const parsedDureeGarantie = dureeGarantie ? Number(dureeGarantie) : null;
-        if (parsedGarantie && !parsedDureeGarantie) {
+        if (parsedGarantie && parsedDureeGarantie === null) {
             return res.status(400).json({ error: 'La durée de garantie est obligatoire si la garantie est activée.' });
         }
         const parsedDureeAssurance = dureeAssurance ? Number(dureeAssurance) : null;
-        if (parsedAssurance && !parsedDureeAssurance) {
+        if (parsedAssurance && parsedDureeAssurance === null) {
             return res.status(400).json({ error: "La durée d'assurance est obligatoire si l'assurance est activée." });
         }
         const parsedMileage = mileage ? Number(mileage) : null;
-        // Validation de la transmission
         const parsedTransmission = transmission ? transmission.toUpperCase() : 'MANUAL';
         if (!['MANUAL', 'AUTOMATIC'].includes(parsedTransmission)) {
             return res.status(400).json({ error: 'La transmission doit être MANUAL ou AUTOMATIC.' });
         }
-        // Gérer la marque avec la fonction utilitaire
-        let marqueEntity;
-        try {
-            marqueEntity = yield findOrCreateMarque(marque);
-        }
-        catch (error) {
-            return res.status(400).json({
-                error: 'Erreur lors de la gestion de la marque',
-                details: error.message
-            });
-        }
-        // Uploader les photos vers Vercel Blob
+        const marqueEntity = yield findOrCreateMarque(marque);
         const files = req.files;
         const photos = [];
-        if (files && files.length > 0) {
+        if ((files === null || files === void 0 ? void 0 : files.length) > 0) {
             for (const file of files) {
-                const newFilename = `vehicles/${Date.now()}-${Math.round(Math.random() * 1e9)}${file.originalname ? (_a = file.originalname.match(/\.[0-9a-z]+$/i)) === null || _a === void 0 ? void 0 : _a[0] : '.jpg'}`;
+                const newFilename = `vehicles/${Date.now()}-${Math.round(Math.random() * 1e9)}${((_a = file.originalname.match(/\.[0-9a-z]+$/i)) === null || _a === void 0 ? void 0 : _a[0]) || '.jpg'}`;
                 const result = yield (0, blob_1.put)(newFilename, file.buffer, {
                     access: 'public',
                     token: process.env.BLOB_READ_WRITE_TOKEN,
@@ -135,7 +109,7 @@ const createVehicule = (req, res) => __awaiter(void 0, void 0, void 0, function*
         }
         const vehicule = yield prisma.vehicle.create({
             data: {
-                marqueId: marqueEntity.id, // Utiliser l'ID de la marque
+                marqueId: marqueEntity.id,
                 model,
                 year: parsedYear,
                 prix: parsedPrix,
@@ -160,10 +134,10 @@ const createVehicule = (req, res) => __awaiter(void 0, void 0, void 0, function*
         return res.status(201).json({ message: 'Véhicule enregistré avec succès', vehicule });
     }
     catch (err) {
-        console.error("Erreur lors de la création du véhicule :", err);
+        console.error('Erreur création véhicule:', err);
         return res.status(500).json({
-            error: "Erreur lors de la création du véhicule",
-            details: err instanceof Error ? err.message : "Erreur inconnue",
+            error: 'Erreur lors de la création du véhicule',
+            details: err.message || 'Erreur inconnue',
         });
     }
 });
@@ -172,176 +146,111 @@ exports.createVehicule = createVehicule;
 const updateVehicule = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a;
     const { id } = req.params;
-    const { marque, model, year, prix, description, garantie, dureeGarantie, chauffeur, assurance, dureeAssurance, carteGrise, vignette, fuelType, mileage, status, forSale, forRent, transmission, } = req.body;
+    const body = req.body;
     try {
-        // Vérifier si le véhicule existe
         const vehicule = yield prisma.vehicle.findUnique({ where: { id: parseInt(id) } });
-        if (!vehicule) {
+        if (!vehicule)
             return res.status(404).json({ error: 'Véhicule non trouvé' });
+        let marqueId = vehicule.marqueId;
+        if (body.marque) {
+            const marqueEntity = yield findOrCreateMarque(body.marque);
+            marqueId = marqueEntity.id;
         }
-        // Valider les champs numériques si fournis
-        const parsedPrix = prix ? Number(prix) : undefined;
-        if (prix && parsedPrix !== undefined && isNaN(parsedPrix)) {
-            return res.status(400).json({ error: 'Le prix doit être un nombre valide.' });
-        }
-        const parsedYear = year ? Number(year) : undefined;
-        if (year && parsedYear !== undefined && isNaN(parsedYear)) {
-            return res.status(400).json({ error: "L'année doit être un nombre valide." });
-        }
-        const parsedDureeGarantie = dureeGarantie ? Number(dureeGarantie) : undefined;
-        if (garantie === 'true' && parsedDureeGarantie == null) {
-            return res.status(400).json({ error: 'La durée de garantie est obligatoire si la garantie est activée.' });
-        }
-        const parsedDureeAssurance = dureeAssurance ? Number(dureeAssurance) : undefined;
-        if (assurance === 'true' && parsedDureeAssurance == null) {
-            return res.status(400).json({ error: "La durée d'assurance est obligatoire si l'assurance est activée." });
-        }
-        const parsedMileage = mileage ? Number(mileage) : undefined;
-        // Gérer la marque si fournie avec la fonction utilitaire
-        let marqueId = undefined;
-        if (marque) {
-            if (typeof marque !== 'string' || marque.trim() === '') {
-                return res.status(400).json({ error: 'La marque doit être une chaîne de caractères non vide.' });
-            }
-            try {
-                const marqueEntity = yield findOrCreateMarque(marque);
-                marqueId = marqueEntity.id;
-            }
-            catch (error) {
-                return res.status(400).json({
-                    error: 'Erreur lors de la gestion de la marque',
-                    details: error.message
-                });
-            }
-        }
-        // Gérer les booléens forSale et forRent si fournis
-        const parsedForSale = forSale !== undefined ? forSale === 'true' : undefined;
-        const parsedForRent = forRent !== undefined ? forRent === 'true' : undefined;
-        // Validation de la transmission si fournie
-        let parsedTransmission = undefined;
-        if (transmission) {
-            const upperTransmission = transmission.toUpperCase();
-            if (!['MANUAL', 'AUTOMATIC'].includes(upperTransmission)) {
-                return res.status(400).json({ error: 'La transmission doit être MANUAL ou AUTOMATIC.' });
-            }
-            parsedTransmission = upperTransmission;
-        }
-        // Gérer les nouvelles photos
-        let photos = vehicule.photos; // Garder les photos existantes par défaut
+        let photos = vehicule.photos;
         const files = req.files;
-        if (files && files.length > 0) {
-            // Supprimer les anciens blobs si existants
-            if (photos && photos.length > 0) {
+        if ((files === null || files === void 0 ? void 0 : files.length) > 0) {
+            if (photos.length > 0) {
                 for (const photo of photos) {
                     try {
                         const url = new URL(photo);
                         yield (0, blob_1.del)(url.pathname.slice(1));
                     }
-                    catch (error) {
-                        console.warn(`Ancien blob non supprimé, URL invalide : ${photo}`);
-                    }
+                    catch (_b) { }
                 }
             }
-            // Uploader les nouvelles photos
             photos = [];
             for (const file of files) {
-                const newFilename = `vehicles/${Date.now()}-${Math.round(Math.random() * 1e9)}${file.originalname ? (_a = file.originalname.match(/\.[0-9a-z]+$/i)) === null || _a === void 0 ? void 0 : _a[0] : '.jpg'}`;
-                const result = yield (0, blob_1.put)(newFilename, file.buffer, {
-                    access: 'public',
-                    token: process.env.BLOB_READ_WRITE_TOKEN,
-                });
+                const newFilename = `vehicles/${Date.now()}-${Math.round(Math.random() * 1e9)}${((_a = file.originalname.match(/\.[0-9a-z]+$/i)) === null || _a === void 0 ? void 0 : _a[0]) || '.jpg'}`;
+                const result = yield (0, blob_1.put)(newFilename, file.buffer, { access: 'public', token: process.env.BLOB_READ_WRITE_TOKEN });
                 photos.push(result.url);
             }
         }
         const updatedVehicule = yield prisma.vehicle.update({
             where: { id: parseInt(id) },
             data: {
-                marqueId: marqueId !== undefined ? marqueId : vehicule.marqueId,
-                model,
-                year: parsedYear,
-                prix: parsedPrix,
-                description,
-                fuelType,
-                mileage: parsedMileage,
-                garantie: garantie === 'true' ? true : garantie === 'false' ? false : undefined,
-                dureeGarantie: parsedDureeGarantie,
-                chauffeur: chauffeur === 'true' ? true : chauffeur === 'false' ? false : undefined,
-                assurance: assurance === 'true' ? true : assurance === 'false' ? false : undefined,
-                dureeAssurance: parsedDureeAssurance,
-                carteGrise: carteGrise === 'true' ? true : carteGrise === 'false' ? false : undefined,
-                vignette: vignette === 'true' ? true : vignette === 'false' ? false : undefined,
-                forSale: parsedForSale,
-                forRent: parsedForRent,
-                status,
-                transmission: parsedTransmission,
+                marqueId,
+                model: body.model,
+                year: body.year ? Number(body.year) : undefined,
+                prix: body.prix ? Number(body.prix) : undefined,
+                description: body.description,
+                fuelType: body.fuelType,
+                mileage: body.mileage ? Number(body.mileage) : undefined,
+                garantie: body.garantie !== undefined ? body.garantie === 'true' : undefined,
+                dureeGarantie: body.dureeGarantie ? Number(body.dureeGarantie) : undefined,
+                chauffeur: body.chauffeur !== undefined ? body.chauffeur === 'true' : undefined,
+                assurance: body.assurance !== undefined ? body.assurance === 'true' : undefined,
+                dureeAssurance: body.dureeAssurance ? Number(body.dureeAssurance) : undefined,
+                carteGrise: body.carteGrise !== undefined ? body.carteGrise === 'true' : undefined,
+                vignette: body.vignette !== undefined ? body.vignette === 'true' : undefined,
+                forSale: body.forSale !== undefined ? body.forSale === 'true' : undefined,
+                forRent: body.forRent !== undefined ? body.forRent === 'true' : undefined,
+                status: body.status,
+                transmission: body.transmission ? body.transmission.toUpperCase() : undefined,
                 photos,
             },
         });
         return res.json({ message: 'Véhicule mis à jour', vehicule: updatedVehicule });
     }
     catch (err) {
-        console.error('Erreur lors de la mise à jour du véhicule :', err);
-        if (err.code === 'P2002') {
-            return res.status(400).json({
-                error: 'Un doublon a été détecté.',
-                details: 'La marque existe déjà avec un nom similaire.',
-            });
-        }
-        return res.status(500).json({
-            error: 'Erreur lors de la mise à jour du véhicule',
-            details: err instanceof Error ? err.message : 'Erreur inconnue',
-        });
+        console.error('Erreur mise à jour véhicule:', err);
+        return res.status(500).json({ error: 'Erreur lors de la mise à jour', details: err.message });
     }
 });
 exports.updateVehicule = updateVehicule;
-// GET ALL VEHICULES WITH FILTERS
+// GET ALL VEHICULES (PUBLIC) - Seulement les véhicules disponibles à l'achat
 const getAllVehicules = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    const { marque, model, minPrix, maxPrix, fuelType, maxMileage, withChauffeur, withGarantie, parkingId, userOwnerId, status, forSale, forRent, transmission, } = req.query;
+    const query = req.query;
     try {
-        const where = {};
-        if (marque) {
-            where.marqueRef = { name: { contains: marque, mode: 'insensitive' } };
-        }
-        if (model) {
-            where.model = { contains: model, mode: 'insensitive' };
-        }
-        if (minPrix || maxPrix) {
+        const where = {
+            NOT: {
+                reservations: {
+                    some: {
+                        type: client_1.ReservationType.ACHAT,
+                        status: { in: [client_1.ReservationStatus.PENDING, client_1.ReservationStatus.ACCEPTED] },
+                    },
+                },
+            },
+            forSale: true,
+        };
+        if (query.marque)
+            where.marqueRef = { name: { contains: query.marque, mode: 'insensitive' } };
+        if (query.model)
+            where.model = { contains: query.model, mode: 'insensitive' };
+        if (query.minPrix || query.maxPrix) {
             where.prix = {};
-            if (minPrix)
-                where.prix.gte = Number(minPrix);
-            if (maxPrix)
-                where.prix.lte = Number(maxPrix);
+            if (query.minPrix)
+                where.prix.gte = Number(query.minPrix);
+            if (query.maxPrix)
+                where.prix.lte = Number(query.maxPrix);
         }
-        if (fuelType) {
-            where.fuelType = fuelType;
-        }
-        if (maxMileage) {
-            where.mileage = { lte: Number(maxMileage) };
-        }
-        if (withChauffeur !== undefined) {
-            where.chauffeur = withChauffeur === 'true';
-        }
-        if (withGarantie !== undefined) {
-            where.garantie = withGarantie === 'true';
-        }
-        if (parkingId) {
-            where.parkingId = Number(parkingId);
-        }
-        if (userOwnerId) {
-            where.userOwnerId = Number(userOwnerId);
-        }
-        if (status) {
-            where.status = status;
-        }
-        if (forSale !== undefined) {
-            where.forSale = forSale === 'true';
-        }
-        if (forRent !== undefined) {
-            where.forRent = forRent === 'true';
-        }
-        if (transmission) {
-            where.transmission = transmission;
-        }
+        if (query.fuelType)
+            where.fuelType = query.fuelType;
+        if (query.maxMileage)
+            where.mileage = { lte: Number(query.maxMileage) };
+        if (query.withChauffeur !== undefined)
+            where.chauffeur = query.withChauffeur === 'true';
+        if (query.withGarantie !== undefined)
+            where.garantie = query.withGarantie === 'true';
+        if (query.parkingId)
+            where.parkingId = Number(query.parkingId);
+        if (query.userOwnerId)
+            where.userOwnerId = Number(query.userOwnerId);
+        if (query.status)
+            where.status = query.status;
+        if (query.forRent !== undefined)
+            where.forRent = query.forRent === 'true';
+        if (query.transmission)
+            where.transmission = query.transmission;
         const vehicules = yield prisma.vehicle.findMany({
             where,
             include: {
@@ -349,16 +258,84 @@ const getAllVehicules = (req, res) => __awaiter(void 0, void 0, void 0, function
                 userOwner: true,
                 stats: true,
                 favorites: true,
-                marqueRef: true
-            }
+                marqueRef: true,
+            },
         });
         return res.json(vehicules);
     }
     catch (err) {
+        console.error('Erreur getAllVehicules:', err);
         return res.status(500).json({ error: 'Erreur lors de la récupération des véhicules' });
     }
 });
 exports.getAllVehicules = getAllVehicules;
+// GET ALL VEHICULES FOR ADMIN - Tous les véhicules sans restriction
+const getAllVehiculesAdmin = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    if (!req.user || req.user.role !== client_1.Role.ADMIN) {
+        return res.status(403).json({ message: 'Accès refusé. Réservé aux administrateurs.' });
+    }
+    const query = req.query;
+    try {
+        const where = {};
+        if (query.marque)
+            where.marqueRef = { name: { contains: query.marque, mode: 'insensitive' } };
+        if (query.model)
+            where.model = { contains: query.model, mode: 'insensitive' };
+        if (query.minPrix || query.maxPrix) {
+            where.prix = {};
+            if (query.minPrix)
+                where.prix.gte = Number(query.minPrix);
+            if (query.maxPrix)
+                where.prix.lte = Number(query.maxPrix);
+        }
+        if (query.fuelType)
+            where.fuelType = query.fuelType;
+        if (query.maxMileage)
+            where.mileage = { lte: Number(query.maxMileage) };
+        if (query.withChauffeur !== undefined)
+            where.chauffeur = query.withChauffeur === 'true';
+        if (query.withGarantie !== undefined)
+            where.garantie = query.withGarantie === 'true';
+        if (query.parkingId)
+            where.parkingId = Number(query.parkingId);
+        if (query.userOwnerId)
+            where.userOwnerId = Number(query.userOwnerId);
+        if (query.status)
+            where.status = query.status;
+        if (query.forSale !== undefined)
+            where.forSale = query.forSale === 'true';
+        if (query.forRent !== undefined)
+            where.forRent = query.forRent === 'true';
+        if (query.transmission)
+            where.transmission = query.transmission;
+        const vehicules = yield prisma.vehicle.findMany({
+            where,
+            include: {
+                parking: true,
+                userOwner: true,
+                stats: true,
+                favorites: true,
+                marqueRef: true,
+                reservations: {
+                    select: {
+                        id: true,
+                        type: true,
+                        status: true,
+                        user: { select: { nom: true, prenom: true, email: true } },
+                        createdAt: true,
+                    },
+                },
+            },
+            orderBy: { createdAt: 'desc' },
+        });
+        return res.json(vehicules);
+    }
+    catch (err) {
+        console.error('Erreur getAllVehiculesAdmin:', err);
+        return res.status(500).json({ error: 'Erreur lors de la récupération des véhicules (admin)' });
+    }
+});
+exports.getAllVehiculesAdmin = getAllVehiculesAdmin;
 // GET VEHICULE BY ID
 const getVehiculeById = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { id } = req.params;
@@ -370,12 +347,11 @@ const getVehiculeById = (req, res) => __awaiter(void 0, void 0, void 0, function
                 userOwner: true,
                 stats: true,
                 favorites: true,
-                marqueRef: true
-            }
+                marqueRef: true,
+            },
         });
-        if (!vehicule) {
+        if (!vehicule)
             return res.status(404).json({ error: 'Véhicule non trouvé' });
-        }
         return res.json(vehicule);
     }
     catch (err) {
@@ -387,50 +363,31 @@ exports.getVehiculeById = getVehiculeById;
 const deleteVehicule = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { id } = req.params;
     const vehiculeId = parseInt(id, 10);
-    if (isNaN(vehiculeId)) {
+    if (isNaN(vehiculeId))
         return res.status(400).json({ error: 'ID invalide' });
-    }
     try {
-        // Vérifier si le véhicule existe et récupérer les photos
         const vehicule = yield prisma.vehicle.findUnique({ where: { id: vehiculeId }, select: { photos: true } });
-        if (!vehicule) {
+        if (!vehicule)
             return res.status(404).json({ error: 'Véhicule introuvable' });
-        }
-        // Supprimer les blobs associés aux photos
-        if (vehicule.photos && vehicule.photos.length > 0) {
+        if (vehicule.photos.length > 0) {
             for (const photo of vehicule.photos) {
                 try {
                     const url = new URL(photo);
                     yield (0, blob_1.del)(url.pathname.slice(1));
                 }
-                catch (error) {
-                    console.warn(`Ancien blob non supprimé, URL invalide : ${photo}`);
-                }
+                catch (_a) { }
             }
         }
-        // Supprimer les dépendances
         yield prisma.reservation.deleteMany({ where: { vehicleId: vehiculeId } });
         yield prisma.vehicleHistory.deleteMany({ where: { vehicleId: vehiculeId } });
         yield prisma.favorite.deleteMany({ where: { vehicleId: vehiculeId } });
         yield prisma.vehicleStats.deleteMany({ where: { vehicleId: vehiculeId } });
-        // Puis supprimer le véhicule
-        yield prisma.vehicle.delete({
-            where: { id: vehiculeId },
-        });
+        yield prisma.vehicle.delete({ where: { id: vehiculeId } });
         return res.json({ message: 'Véhicule supprimé avec succès' });
     }
     catch (err) {
-        console.error('Erreur suppression véhicule:', err);
-        if (err.code === 'P2025') {
-            return res.status(404).json({ error: 'Véhicule introuvable' });
-        }
-        if (err.code === 'P2003') {
-            return res.status(400).json({ error: 'Impossible de supprimer : véhicule lié à d’autres données' });
-        }
-        return res.status(500).json({
-            error: 'Erreur lors de la suppression du véhicule',
-            details: err.message || 'Erreur inconnue',
-        });
+        console.error('Erreur suppression:', err);
+        return res.status(500).json({ error: 'Erreur lors de la suppression', details: err.message });
     }
 });
 exports.deleteVehicule = deleteVehicule;
