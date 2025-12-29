@@ -9,6 +9,7 @@ import notificationRoutes from './routes/notificationRoutes';
 import marqueRoutes from './routes/marqueRoutes';
 import messageRoutes from './routes/messageRoutes';
 import Pusher from 'pusher';
+import pusherRoutes from './routes/pusher';
 
 const app = express();
 const prisma = new PrismaClient();
@@ -33,6 +34,7 @@ app.use('/api/reservations', reservationRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/marques', marqueRoutes);
 app.use('/api/messages', messageRoutes);
+app.use('/api', pusherRoutes);
 
 // Middleware global d'erreurs
 app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
