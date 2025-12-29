@@ -15,10 +15,11 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.markMessageAsRead = exports.deleteMessage = exports.updateMessage = exports.getUserConversations = exports.getConversation = exports.sendMessage = void 0;
 const client_1 = require("@prisma/client");
 const index_1 = require("../index");
-// Import de la fonction de notification push
 const sendNotification_1 = require("../utils/sendNotification");
 const prisma = new client_1.PrismaClient();
-// === ENVOYER UN MESSAGE ===
+// =====================
+// ENVOYER UN MESSAGE
+// =====================
 const sendMessage = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a;
     try {
@@ -35,7 +36,7 @@ const sendMessage = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
         if (!sender || !receiver)
             return res.status(404).json({ message: 'Utilisateur introuvable' });
         if (sender.role === receiver.role)
-            return res.status(403).json({ message: 'Les messages doivent être entre client et parking' });
+            return res.status(403).json({ message: 'Messages autorisés seulement entre client et parking' });
         if (parkingId) {
             const parking = yield prisma.parking.findUnique({ where: { id: parkingId } });
             if (!parking)
@@ -45,19 +46,16 @@ const sendMessage = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
             data: { senderId, receiverId, content: content.trim(), parkingId },
             include: { sender: true, receiver: true, parking: true },
         });
-        // Compose payload including clientTempId (echo back to client — not persisted)
         const payload = Object.assign(Object.assign({}, message), { clientTempId });
-        // Pusher -> envoie le même payload pour que le client puisse matcher
-        yield index_1.pusher.trigger(`user_${receiverId}`, 'newMessage', payload);
-        yield index_1.pusher.trigger(`user_${senderId}`, 'newMessage', payload);
-        // Push Expo (unchanged)
+        // 🔹 PUSHER
+        yield Promise.all([
+            index_1.pusher.trigger(`private-user-${receiverId}`, 'newMessage', payload),
+            index_1.pusher.trigger(`private-user-${senderId}`, 'newMessage', payload),
+        ]);
+        // 🔹 NOTIFICATION PUSH
         const senderName = `${sender.nom || ''} ${sender.prenom || ''}`.trim() || 'Quelqu’un';
-        yield (0, sendNotification_1.notifyUser)(receiverId, `Nouveau message de ${senderName}`, content.substring(0, 100), client_1.NotificationType.MESSAGE, {
-            messageId: message.id,
-            senderId,
-            screen: 'Chat',
-            parkingId: parkingId || undefined,
-        }).catch(err => console.error('Échec push Expo (message):', err.message));
+        (0, sendNotification_1.notifyUser)(receiverId, `Nouveau message de ${senderName}`, content.substring(0, 100), client_1.NotificationType.MESSAGE, { messageId: message.id, senderId, screen: 'Chat', parkingId: parkingId !== null && parkingId !== void 0 ? parkingId : undefined }).catch(() => { });
+        // 🔹 NOTIFICATION DB
         yield prisma.notification.create({
             data: {
                 userId: receiverId,
@@ -66,7 +64,6 @@ const sendMessage = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
                 type: 'MESSAGE',
             },
         });
-        // Renvoyer payload contenant clientTempId
         res.status(201).json(payload);
     }
     catch (error) {
@@ -75,7 +72,9 @@ const sendMessage = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
     }
 });
 exports.sendMessage = sendMessage;
-// === RÉCUPÉRER LA CONVERSATION ===
+// =====================
+// RÉCUPÉRER UNE CONVERSATION
+// =====================
 const getConversation = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a;
     try {
@@ -86,30 +85,26 @@ const getConversation = (req, res) => __awaiter(void 0, void 0, void 0, function
         const parkingId = req.query.parkingId ? parseInt(req.query.parkingId) : undefined;
         if (!userId)
             return res.status(401).json({ message: 'Utilisateur non authentifié' });
-        let where = {
+        const where = {
             OR: [
                 { senderId: userId, receiverId: otherUserId },
                 { senderId: otherUserId, receiverId: userId },
             ],
             deletedAt: null,
         };
-        if (parkingId !== undefined) {
+        if (parkingId !== undefined)
             where.parkingId = parkingId;
-        }
-        const messages = yield prisma.message.findMany({
-            where,
-            orderBy: { createdAt: 'asc' },
-            include: { sender: true, receiver: true, parking: true },
-            skip: (page - 1) * pageSize,
-            take: pageSize,
-        });
-        const total = yield prisma.message.count({ where });
-        res.json({
-            messages,
-            totalPages: Math.ceil(total / pageSize),
-            currentPage: page,
-            parkingId, // Ajout optionnel pour matcher le frontend
-        });
+        const [messages, total] = yield Promise.all([
+            prisma.message.findMany({
+                where,
+                orderBy: { createdAt: 'asc' },
+                include: { sender: true, receiver: true, parking: true },
+                skip: (page - 1) * pageSize,
+                take: pageSize,
+            }),
+            prisma.message.count({ where }),
+        ]);
+        res.json({ messages, totalPages: Math.ceil(total / pageSize), currentPage: page, parkingId });
     }
     catch (error) {
         console.error('Erreur getConversation:', error);
@@ -157,9 +152,11 @@ const getUserConversations = (req, res) => __awaiter(void 0, void 0, void 0, fun
     }
 });
 exports.getUserConversations = getUserConversations;
-// === METTRE À JOUR UN MESSAGE ===
+// =====================
+// METTRE À JOUR UN MESSAGE
+// =====================
 const updateMessage = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b;
+    var _a;
     try {
         const userId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.id;
         const messageId = parseInt(req.params.id);
@@ -178,10 +175,10 @@ const updateMessage = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             data: { content: content.trim() },
             include: { sender: true, receiver: true, parking: true },
         });
-        yield index_1.pusher.trigger(`user_${message.receiverId}`, 'updateMessage', updated);
-        yield index_1.pusher.trigger(`user_${message.senderId}`, 'updateMessage', updated);
-        // Optionnel : push de mise à jour
-        yield (0, sendNotification_1.notifyUser)(message.receiverId, 'Message modifié', `${(_b = req.user) === null || _b === void 0 ? void 0 : _b.nom} a modifié un message.`, client_1.NotificationType.MESSAGE, { messageId, action: 'updated' }).catch(() => { });
+        yield Promise.all([
+            index_1.pusher.trigger(`private-user-${message.receiverId}`, 'updateMessage', updated),
+            index_1.pusher.trigger(`private-user-${message.senderId}`, 'updateMessage', updated),
+        ]);
         res.json(updated);
     }
     catch (error) {
@@ -190,7 +187,9 @@ const updateMessage = (req, res) => __awaiter(void 0, void 0, void 0, function* 
     }
 });
 exports.updateMessage = updateMessage;
-// === SUPPRIMER UN MESSAGE (soft) ===
+// =====================
+// SUPPRIMER UN MESSAGE
+// =====================
 const deleteMessage = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a;
     try {
@@ -203,12 +202,11 @@ const deleteMessage = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             return res.status(404).json({ message: 'Message introuvable' });
         if (message.senderId !== userId)
             return res.status(403).json({ message: 'Accès refusé' });
-        yield prisma.message.update({
-            where: { id: messageId },
-            data: { deletedAt: new Date() },
-        });
-        yield index_1.pusher.trigger(`user_${message.receiverId}`, 'deleteMessage', messageId);
-        yield index_1.pusher.trigger(`user_${message.senderId}`, 'deleteMessage', messageId);
+        yield prisma.message.update({ where: { id: messageId }, data: { deletedAt: new Date() } });
+        yield Promise.all([
+            index_1.pusher.trigger(`private-user-${message.receiverId}`, 'deleteMessage', messageId),
+            index_1.pusher.trigger(`private-user-${message.senderId}`, 'deleteMessage', messageId),
+        ]);
         res.json({ message: 'Message supprimé' });
     }
     catch (error) {
@@ -217,7 +215,9 @@ const deleteMessage = (req, res) => __awaiter(void 0, void 0, void 0, function* 
     }
 });
 exports.deleteMessage = deleteMessage;
-// === MARQUER COMME LU ===
+// =====================
+// MARQUER COMME LU
+// =====================
 const markMessageAsRead = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a;
     try {
@@ -235,8 +235,10 @@ const markMessageAsRead = (req, res) => __awaiter(void 0, void 0, void 0, functi
             data: { read: true },
             include: { sender: true, receiver: true, parking: true },
         });
-        yield index_1.pusher.trigger(`user_${message.senderId}`, 'messageRead', updated);
-        yield index_1.pusher.trigger(`user_${message.receiverId}`, 'messageRead', updated);
+        yield Promise.all([
+            index_1.pusher.trigger(`private-user-${message.senderId}`, 'messageRead', updated),
+            index_1.pusher.trigger(`private-user-${message.receiverId}`, 'messageRead', updated),
+        ]);
         res.json(updated);
     }
     catch (error) {
