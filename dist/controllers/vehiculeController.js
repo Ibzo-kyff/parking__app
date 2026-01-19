@@ -207,11 +207,15 @@ const updateVehicule = (req, res) => __awaiter(void 0, void 0, void 0, function*
     }
 });
 exports.updateVehicule = updateVehicule;
-// GET ALL VEHICULES (PUBLIC) - Seulement les véhicules disponibles à l'achat
+// GET ALL VEHICULES (PUBLIC) - Véhicules disponibles à l'achat ou à la location
 const getAllVehicules = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const query = req.query;
     try {
         const where = {
+            OR: [
+                { forSale: true },
+                { forRent: true }
+            ],
             NOT: {
                 reservations: {
                     some: {
@@ -220,7 +224,6 @@ const getAllVehicules = (req, res) => __awaiter(void 0, void 0, void 0, function
                     },
                 },
             },
-            forSale: true,
         };
         if (query.marque)
             where.marqueRef = { name: { contains: query.marque, mode: 'insensitive' } };
@@ -247,6 +250,8 @@ const getAllVehicules = (req, res) => __awaiter(void 0, void 0, void 0, function
             where.userOwnerId = Number(query.userOwnerId);
         if (query.status)
             where.status = query.status;
+        if (query.forSale !== undefined)
+            where.forSale = query.forSale === 'true';
         if (query.forRent !== undefined)
             where.forRent = query.forRent === 'true';
         if (query.transmission)
