@@ -233,12 +233,16 @@ export const updateVehicule = async (req: Request, res: Response) => {
   }
 };
 
-// GET ALL VEHICULES (PUBLIC) - Seulement les véhicules disponibles à l'achat
+// GET ALL VEHICULES (PUBLIC) - Véhicules disponibles à l'achat ou à la location
 export const getAllVehicules = async (req: Request, res: Response) => {
   const query = req.query;
 
   try {
     const where: any = {
+      OR: [
+        { forSale: true },
+        { forRent: true }
+      ],
       NOT: {
         reservations: {
           some: {
@@ -247,7 +251,6 @@ export const getAllVehicules = async (req: Request, res: Response) => {
           },
         },
       },
-      forSale: true,
     };
 
     if (query.marque) where.marqueRef = { name: { contains: query.marque as string, mode: 'insensitive' } };
@@ -264,6 +267,7 @@ export const getAllVehicules = async (req: Request, res: Response) => {
     if (query.parkingId) where.parkingId = Number(query.parkingId);
     if (query.userOwnerId) where.userOwnerId = Number(query.userOwnerId);
     if (query.status) where.status = query.status as string;
+    if (query.forSale !== undefined) where.forSale = query.forSale === 'true';
     if (query.forRent !== undefined) where.forRent = query.forRent === 'true';
     if (query.transmission) where.transmission = query.transmission as string;
 
