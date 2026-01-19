@@ -227,7 +227,7 @@ export const updateReservationStatus = async (req: AuthRequest, res: Response) =
       }
 
       // Pour les locations, vérifier le délai de 24h
-      if (reservation.type === ReservationType.LOCATION && reservation.dateDebut) {
+     if (req.user.role === 'CLIENT' && reservation.type === ReservationType.LOCATION && reservation.dateDebut) {
         const now = new Date();
         const minCancelTime = new Date(reservation.dateDebut);
         minCancelTime.setDate(minCancelTime.getDate() - 1);
