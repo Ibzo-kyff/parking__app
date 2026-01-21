@@ -1,6 +1,7 @@
 import express from 'express';
 import authRoutes from './routes/authRoutes';
 import { PrismaClient } from '@prisma/client';
+import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import vehiculeRoutes from './routes/vehiculeRoutes';
 import parkingRoutes from './routes/parkingRoutes';
@@ -13,6 +14,37 @@ import pusherRoutes from './routes/pusher';
 
 const app = express();
 const prisma = new PrismaClient();
+
+const allowedOrigins = [
+  "http://localhost:3000",
+  "https://mobility-mali.netlify.app",
+];
+
+app.use(
+  cors({
+    origin: function (origin, callback) {
+      // Autoriser les appels server-to-server (Postman, SSR, etc.)
+      if (!origin) return callback(null, true);
+
+      if (allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+
+      return callback(
+        new Error(`CORS bloqué pour l'origine : ${origin}`),
+        false
+      );
+    },
+    credentials: true, // IMPORTANT si cookies / auth
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: [
+      "Content-Type",
+      "Authorization",
+      "X-Requested-With",
+    ],
+  })
+);
+
 
 // Initialisation de Pusher
 export const pusher = new Pusher({
@@ -61,4 +93,4 @@ app.listen(PORT, async () => {
     process.exit(1);
   }
 });
-export default app; // Export pour Vercel
+export default app; 
