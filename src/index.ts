@@ -55,6 +55,7 @@ export const pusher = new Pusher({
   useTLS: true,
 });
 
+app.options("*", cors());
 app.use(express.json());
 app.use(cookieParser());
 

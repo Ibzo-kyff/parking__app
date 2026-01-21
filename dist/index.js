@@ -58,6 +58,7 @@ exports.pusher = new pusher_1.default({
     cluster: process.env.PUSHER_CLUSTER,
     useTLS: true,
 });
+app.options("*", (0, cors_1.default)());
 app.use(express_1.default.json());
 app.use((0, cookie_parser_1.default)());
 // Routes
