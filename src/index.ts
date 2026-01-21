@@ -20,6 +20,7 @@ const prisma = new PrismaClient();
 
 const allowedOrigins = [
   "http://localhost:3000",
+  "https://localhost:3000",
   "https://mobility-mali.netlify.app",
 ];
 
