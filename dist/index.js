@@ -28,25 +28,13 @@ const pusher_1 = __importDefault(require("pusher"));
 const pusher_2 = __importDefault(require("./routes/pusher"));
 const app = (0, express_1.default)();
 const prisma = new client_1.PrismaClient();
-const allowedOrigins = [
-    "http://localhost:3000",
-    "https://mobility-mali.netlify.app",
-];
-const corsOptions = {
-    origin(origin, callback) {
-        if (!origin)
-            return callback(null, true);
-        if (allowedOrigins.includes(origin)) {
-            return callback(null, true);
-        }
-        return callback(new Error("Not allowed by CORS"));
-    },
+app.use((0, cors_1.default)({
+    origin: [
+        "http://localhost:3000",
+        "https://mobility-mali.netlify.app",
+    ],
     credentials: true,
-    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
-};
-app.use((0, cors_1.default)(corsOptions));
-app.options("/*", (0, cors_1.default)(corsOptions));
+}));
 app.use(express_1.default.json());
 app.use((0, cookie_parser_1.default)());
 exports.pusher = new pusher_1.default({
@@ -65,16 +53,8 @@ app.use("/api/marques", marqueRoutes_1.default);
 app.use("/api/messages", messageRoutes_1.default);
 app.use("/api", pusher_2.default);
 app.use((err, _req, res, _next) => {
-    if (err && typeof err === "object" && "name" in err && err.name === "MulterError") {
-        return res.status(400).json({
-            error: err.message || "Erreur upload",
-            hint: "Utilisez form-data avec un champ fichier valide",
-        });
-    }
-    if (err instanceof Error) {
-        return res.status(500).json({ error: err.message });
-    }
-    return res.status(500).json({ error: "Erreur serveur" });
+    console.error(err);
+    return res.status(500).json({ error: err.message || "Erreur serveur" });
 });
 if (process.env.NODE_ENV !== "production") {
     const PORT = process.env.PORT || 5000;
