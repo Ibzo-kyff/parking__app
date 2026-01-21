@@ -31,6 +31,7 @@ const app = (0, express_1.default)();
 const prisma = new client_1.PrismaClient();
 const allowedOrigins = [
     "http://localhost:3000",
+    "https://localhost:3000",
     "https://mobility-mali.netlify.app",
 ];
 const corsOptions = {
