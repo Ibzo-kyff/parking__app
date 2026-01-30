@@ -107,6 +107,9 @@ model Reservation {
   dateFin    DateTime?
   type       ReservationType
   commission Float?
+  motifLocation     String?
+  localisation      LocalisationType? // Utilisez l'enum ici
+  conditionsAcceptees Boolean?
   createdAt  DateTime        @default(now())
   updatedAt  DateTime        @updatedAt
   status ReservationStatus @default(PENDING)
@@ -236,4 +239,9 @@ CANCELED
 enum Transmission {
 MANUAL
 AUTOMATIC
+}
+
+enum LocalisationType {
+  BAMAKO
+  HORS_BAMAKO
 }
