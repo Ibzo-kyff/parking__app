@@ -12,21 +12,46 @@ const reservationSchema = z
     dateDebut: z.string().datetime().optional().nullable(),
     dateFin: z.string().datetime().optional().nullable(),
     type: z.nativeEnum(ReservationType),
+    motifLocation: z.string().optional().nullable(),
+    localisation: z.enum(['BAMAKO', 'HORS_BAMAKO']).optional().nullable(),
+    conditionsAcceptees: z.boolean().optional().nullable(),
   })
   .refine(
     (data) => {
       if (data.type === ReservationType.LOCATION) {
-        return (
-          data.dateDebut &&
-          data.dateFin &&
-          new Date(data.dateDebut) < new Date(data.dateFin)
-        );
+        // Validation des dates pour location
+        if (!data.dateDebut || !data.dateFin) return false;
+        
+        const startDate = new Date(data.dateDebut);
+        const endDate = new Date(data.dateFin);
+        
+        // Permettre une réservation d'au moins 1 jour (24h)
+        // La date de fin doit être après la date de début
+        // Même si c'est le même jour, la fin doit être après le début
+        return startDate < endDate;
       }
       return true;
     },
     {
       message:
-        'Les dates de début et de fin sont requises pour une location et doivent être valides',
+        'Pour une location, les dates de début et de fin sont requises et la date de fin doit être après la date de début',
+    }
+  )
+  .refine(
+    (data) => {
+      if (data.type === ReservationType.LOCATION) {
+        // Vérifier que le motif est présent
+        if (!data.motifLocation || data.motifLocation.trim() === '') return false;
+        // Vérifier que la localisation est présente
+        if (!data.localisation) return false;
+        // Vérifier que les conditions sont acceptées
+        if (!data.conditionsAcceptees) return false;
+      }
+      return true;
+    },
+    {
+      message: 'Pour une location, le motif, la localisation et l\'acceptation des conditions sont obligatoires',
+      path: ['type'],
     }
   );
 
@@ -35,21 +60,19 @@ export const createReservation = async (req: AuthRequest, res: Response) => {
     if (!req.user) return res.status(401).json({ message: 'Non autorisé' });
 
     const data = reservationSchema.parse(req.body);
-    const { vehicleId, dateDebut, dateFin, type } = data;
+    const { 
+      vehicleId, 
+      dateDebut, 
+      dateFin, 
+      type, 
+      motifLocation, 
+      localisation, 
+      conditionsAcceptees 
+    } = data;
     const userId = req.user.id;
 
     const startDate = dateDebut ? new Date(dateDebut) : null;
     const endDate = dateFin ? new Date(dateFin) : null;
-
-    // Validation des dates pour location
-    if (
-      type === ReservationType.LOCATION &&
-      (!startDate || !endDate || startDate >= endDate)
-    ) {
-      return res.status(400).json({
-        message: 'La date de fin doit être après la date de début pour une location',
-      });
-    }
 
     // Récupérer le véhicule avec ses réservations
     const vehicle = await prisma.vehicle.findUnique({
@@ -76,7 +99,7 @@ export const createReservation = async (req: AuthRequest, res: Response) => {
     if (vehicle.status !== VehicleStatus.DISPONIBLE)
       return res.status(400).json({ message: "Ce véhicule n'est pas disponible" });
 
-    // === NOUVELLE VÉRIFICATION CRITIQUE POUR L'ACHAT ===
+    // Vérification pour l'achat : pas de demande d'achat en cours
     if (type === ReservationType.ACHAT) {
       const existingPurchaseRequest = vehicle.reservations.find(
         (r) => r.type === ReservationType.ACHAT
@@ -85,33 +108,47 @@ export const createReservation = async (req: AuthRequest, res: Response) => {
       if (existingPurchaseRequest) {
         return res.status(400).json({
           message:
-            'Ce véhicule fait déjà l’objet d’une demande d’achat en cours. Vous ne pouvez pas en faire une autre tant que celle-ci n’est pas traitée.',
+            'Ce véhicule fait déjà l\'objet d\'une demande d\'achat en cours. Vous ne pouvez pas en faire une autre tant que celle-ci n\'est pas traitée.',
         });
       }
     }
-    // ================================================
 
-    // Vérification des conflits de dates pour les locations (déjà présent, on le garde)
-    if (type === ReservationType.LOCATION) {
+    // Vérification des conflits de dates pour les locations
+    if (type === ReservationType.LOCATION && startDate && endDate) {
       const conflict = await prisma.reservation.findFirst({
         where: {
           vehicleId,
           status: ReservationStatus.ACCEPTED,
+          type: ReservationType.LOCATION,
           OR: [
+            // Conflit : une réservation existante chevauche la nouvelle
             {
-              dateDebut: { lte: endDate! },
-              dateFin: { gte: startDate! },
+              dateDebut: { lt: endDate },
+              dateFin: { gt: startDate },
+            },
+            // Ou la nouvelle réservation est complètement à l'intérieur d'une existante
+            {
+              dateDebut: { lte: startDate },
+              dateFin: { gte: endDate },
             },
           ],
         },
       });
 
-      if (conflict)
-        return res.status(400).json({ message: 'Le véhicule est déjà réservé pour cette période' });
+      if (conflict) {
+        return res.status(400).json({ 
+          message: 'Le véhicule est déjà réservé pour cette période',
+          conflictDetails: {
+            existingStart: conflict.dateDebut,
+            existingEnd: conflict.dateFin
+          }
+        });
+      }
     }
 
     const commission = type === ReservationType.LOCATION ? vehicle.prix * 0.1 : null;
 
+    // Créer la réservation avec tous les champs
     const reservation = await prisma.reservation.create({
       data: {
         userId,
@@ -119,6 +156,9 @@ export const createReservation = async (req: AuthRequest, res: Response) => {
         dateDebut: startDate,
         dateFin: endDate,
         type,
+        motifLocation: type === ReservationType.LOCATION ? motifLocation : null,
+        localisation: type === ReservationType.LOCATION ? localisation : null,
+        conditionsAcceptees: type === ReservationType.LOCATION ? conditionsAcceptees : null,
         commission,
         status: ReservationStatus.PENDING,
       },
@@ -127,8 +167,8 @@ export const createReservation = async (req: AuthRequest, res: Response) => {
         user: true,
       },
     });
-
-    // Notifications (inchangées)
+    
+    // Notifications
     await notifyUser(
       userId,
       'Demande de réservation envoyée',
@@ -232,17 +272,25 @@ export const updateReservationStatus = async (req: AuthRequest, res: Response) =
             vehicleId: reservation.vehicleId,
             status: ReservationStatus.ACCEPTED,
             id: { not: reservation.id },
+            type: ReservationType.LOCATION,
             OR: [
               {
-                dateDebut: { lte: reservation.dateFin },
-                dateFin: { gte: reservation.dateDebut },
+                dateDebut: { lt: reservation.dateFin },
+                dateFin: { gt: reservation.dateDebut },
               },
             ],
           },
         });
 
-        if (conflict)
-          return res.status(400).json({ message: 'Conflit de dates détecté' });
+        if (conflict) {
+          return res.status(400).json({ 
+            message: 'Conflit de dates détecté',
+            conflictDetails: {
+              existingStart: conflict.dateDebut,
+              existingEnd: conflict.dateFin
+            }
+          });
+        }
       }
     }
     else if (status === ReservationStatus.CANCELED) {
@@ -251,16 +299,18 @@ export const updateReservationStatus = async (req: AuthRequest, res: Response) =
         return res.status(400).json({ message: 'Cette réservation est déjà annulée' });
       }
 
-      // Pour les locations, vérifier le délai de 24h
-     if (req.user.role === 'CLIENT' && reservation.type === ReservationType.LOCATION && reservation.dateDebut) {
+      // Pour les locations, vérifier le délai de 12h (réduit de 24h)
+      if (req.user.role === 'CLIENT' && reservation.type === ReservationType.LOCATION && reservation.dateDebut) {
         const now = new Date();
         const minCancelTime = new Date(reservation.dateDebut);
-        minCancelTime.setDate(minCancelTime.getDate() - 1);
+        // Réduire à 12 heures au lieu de 24
+        minCancelTime.setHours(minCancelTime.getHours() - 12);
        
         if (now > minCancelTime) {
           return res.status(400).json({
-            message: 'Annulation impossible moins de 24h avant le début de la location',
-            earliestCancelTime: minCancelTime
+            message: 'Annulation impossible moins de 12h avant le début de la location',
+            earliestCancelTime: minCancelTime,
+            currentTime: now
           });
         }
       }
@@ -338,9 +388,14 @@ async function sendStatusChangeNotification(
   switch (newStatus) {
     case ReservationStatus.ACCEPTED:
       title = 'Réservation acceptée';
-      message = reservation.type === ReservationType.ACHAT
-        ? `Votre achat du véhicule ${vehicleName} a été accepté.`
-        : `Votre location du véhicule ${vehicleName} a été acceptée du ${reservation.dateDebut?.toISOString()} au ${reservation.dateFin?.toISOString()}.`;
+      if (reservation.type === ReservationType.ACHAT) {
+        message = `Votre achat du véhicule ${vehicleName} a été accepté.`;
+      } else {
+        // Formatter les dates pour la location
+        const startDate = reservation.dateDebut ? new Date(reservation.dateDebut).toLocaleDateString('fr-FR') : '';
+        const endDate = reservation.dateFin ? new Date(reservation.dateFin).toLocaleDateString('fr-FR') : '';
+        message = `Votre location du véhicule ${vehicleName} a été acceptée du ${startDate} au ${endDate}.`;
+      }
       break;
 
     case ReservationStatus.CANCELED:
@@ -390,7 +445,14 @@ export const getAllReservations = async (req: AuthRequest, res: Response) => {
       return res.status(403).json({ message: 'Accès non autorisé' });
 
     const reservations = await prisma.reservation.findMany({
-      include: { user: true, vehicle: { include: { marqueRef: true } } },
+      include: { 
+        user: true, 
+        vehicle: { 
+          include: { 
+            marqueRef: true 
+          } 
+        } 
+      },
       orderBy: { createdAt: 'desc' },
     });
 
@@ -434,7 +496,13 @@ export const getUserReservations = async (req: AuthRequest, res: Response) => {
 
     const reservations = await prisma.reservation.findMany({
       where: { userId: req.user.id },
-      include: { vehicle: { include: { marqueRef: true } } },
+      include: { 
+        vehicle: { 
+          include: { 
+            marqueRef: true 
+          } 
+        } 
+      },
       orderBy: { dateDebut: 'desc' },
     });
 
@@ -452,12 +520,20 @@ export const getReservation = async (req: AuthRequest, res: Response) => {
     const { id } = req.params;
     const reservation = await prisma.reservation.findUnique({
       where: { id: Number(id) },
-      include: { vehicle: { include: { marqueRef: true } }, user: true },
+      include: { 
+        vehicle: { 
+          include: { 
+            marqueRef: true 
+          } 
+        }, 
+        user: true 
+      },
     });
 
     if (!reservation)
       return res.status(404).json({ message: 'Réservation non trouvée' });
 
+    // Vérification des permissions
     if (req.user.role === 'CLIENT' && reservation.userId !== req.user.id)
       return res.status(403).json({ message: 'Accès non autorisé' });
 
@@ -495,13 +571,20 @@ export const updateReservation = async (req: AuthRequest, res: Response) => {
     const updated = await prisma.reservation.update({
       where: { id: Number(id) },
       data,
-      include: { vehicle: { include: { marqueRef: true } }, user: true },
+      include: { 
+        vehicle: { 
+          include: { 
+            marqueRef: true 
+          } 
+        }, 
+        user: true 
+      },
     });
 
     await notifyUser(
       updated.userId,
       'Réservation mise à jour',
-      `Votre réservation du véhicule ${updated.vehicle.marqueRef?.name ?? 'Marque inconnue'} ${updated.vehicle.model ?? ''} a été modifiée par l’administrateur.`,
+      `Votre réservation du véhicule ${updated.vehicle.marqueRef?.name ?? 'Marque inconnue'} ${updated.vehicle.model ?? ''} a été modifiée par l'administrateur.`,
       NotificationType.MESSAGE,
       { reservationId: updated.id }
     );
