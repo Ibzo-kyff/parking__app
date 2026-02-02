@@ -20,6 +20,8 @@ const publicUserSelect = {
     prenom: true,
     image: true,
     role: true,
+    isOnline: true,
+    lastSeen: true,
 };
 const publicParkingSelect = {
     id: true,
