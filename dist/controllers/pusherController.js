@@ -9,7 +9,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.registerPushToken = exports.pusherAuth = void 0;
+exports.pusherWebhook = exports.registerPushToken = exports.pusherAuth = void 0;
 const index_1 = require("../index");
 const client_1 = require("@prisma/client");
 const prisma = new client_1.PrismaClient();
@@ -21,7 +21,21 @@ const pusherAuth = (req, res) => {
         }
         const socketId = req.body.socket_id;
         const channel = req.body.channel_name;
-        const authResponse = index_1.pusher.authorizeChannel(socketId, channel, { user_id: String(req.user.id) });
+        let authResponse;
+        if (channel.startsWith('presence-')) {
+            // Pour channels de présence, ajouter user_info
+            const userInfo = {
+                user_id: String(req.user.id),
+                user_info: {
+                    name: `${req.user.nom || ''} ${req.user.prenom || ''}`.trim() || 'Utilisateur anonyme',
+                },
+            };
+            authResponse = index_1.pusher.authorizeChannel(socketId, channel, userInfo);
+        }
+        else {
+            // Pour autres channels (privés)
+            authResponse = index_1.pusher.authorizeChannel(socketId, channel, { user_id: String(req.user.id) });
+        }
         res.send(authResponse);
     }
     catch (error) {
@@ -46,3 +60,66 @@ const registerPushToken = (req, res) => __awaiter(void 0, void 0, void 0, functi
     res.json({ success: true });
 });
 exports.registerPushToken = registerPushToken;
+const pusherWebhook = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
+    try {
+        // Valider le webhook avec Pusher
+        const webhookRequest = { headers: req.headers, rawBody: (_a = req.rawBody) !== null && _a !== void 0 ? _a : JSON.stringify(req.body) };
+        const webhook = index_1.pusher.webhook(webhookRequest);
+        if (!webhook.isValid()) {
+            return res.status(400).json({ message: 'Webhook invalide' });
+        }
+        // Traiter les événements (utiliser une boucle sync avec await pour éviter races)
+        const events = webhook.getEvents();
+        for (const event of events) {
+            console.log(`Webhook event reçu: ${event.name}`); // Log pour debug
+            if (event.name === 'member_added') {
+                const userId = parseInt(event.user_id);
+                const user = yield prisma.user.findUnique({ where: { id: userId } });
+                if (!user)
+                    continue;
+                const wasOffline = user.connectionCount === 0;
+                yield prisma.user.update({
+                    where: { id: userId },
+                    data: {
+                        isOnline: true,
+                        socketId: event.socket_id,
+                        connectionCount: { increment: 1 },
+                        lastSeen: null,
+                    },
+                });
+                // Diffuser seulement si c'était la première connexion
+                if (wasOffline) {
+                    yield index_1.pusher.trigger('presence-online', 'user-online', { userId });
+                }
+            }
+            else if (event.name === 'member_removed') {
+                const userId = parseInt(event.user_id);
+                const user = yield prisma.user.findUnique({ where: { id: userId } });
+                if (!user)
+                    continue;
+                const newCount = Math.max(0, user.connectionCount - 1); // Éviter négatif
+                const nowOffline = newCount === 0;
+                yield prisma.user.update({
+                    where: { id: userId },
+                    data: {
+                        connectionCount: newCount,
+                        isOnline: !nowOffline,
+                        lastSeen: nowOffline ? new Date() : user.lastSeen,
+                        socketId: nowOffline ? null : user.socketId,
+                    },
+                });
+                // Diffuser seulement si c'est la dernière déconnexion
+                if (nowOffline) {
+                    yield index_1.pusher.trigger('presence-online', 'user-offline', { userId, lastSeen: new Date() });
+                }
+            }
+        }
+        res.status(200).send('OK');
+    }
+    catch (error) {
+        console.error('Erreur webhook Pusher:', error);
+        res.status(500).json({ message: 'Erreur traitement webhook' });
+    }
+});
+exports.pusherWebhook = pusherWebhook;

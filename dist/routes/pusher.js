@@ -9,4 +9,5 @@ const authMiddleware_1 = require("../middleware/authMiddleware");
 const router = express_1.default.Router();
 router.post('/auth/pusher', authMiddleware_1.authenticateToken, pusherController_1.pusherAuth);
 router.post('/auth/push-token', authMiddleware_1.authenticateToken, pusherController_1.registerPushToken);
+router.post('/pusher/webhook', pusherController_1.pusherWebhook);
 exports.default = router;

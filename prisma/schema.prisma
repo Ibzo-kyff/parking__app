@@ -29,6 +29,10 @@ model User {
   passwordResetOTP         String?
   emailVerifyOTP           String?
   emailVerifyOTPExpires    DateTime?
+  isOnline         Boolean        @default(false)
+  lastSeen         DateTime?
+  socketId         String?        // Retirez @unique ici
+  connectionCount  Int            @default(0)
   expoPushToken  String?
   passwordResetOTPExpires  DateTime?
   favorites                Favorite[]
