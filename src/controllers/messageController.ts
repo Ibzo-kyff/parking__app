@@ -130,15 +130,24 @@ export const sendMessage = async (req: AuthRequest, res: Response) => {
 export const getConversation = async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.user?.id;
-    const otherUserId = parseInt(req.params.userId);
-    const page = parseInt(req.query.page as string) || 1;
-    const pageSize = parseInt(req.query.pageSize as string) || 20;
+    const otherUserId = Number(req.params.userId);
+
+    if (!userId) {
+      return res.status(401).json({ message: 'Utilisateur non authentifié' });
+    }
+
+    if (!otherUserId) {
+      return res.status(400).json({ message: 'userId invalide' });
+    }
+
     const parkingId = req.query.parkingId
-      ? parseInt(req.query.parkingId as string)
+      ? Number(req.query.parkingId)
       : undefined;
 
-    if (!userId) return res.status(401).json({ message: 'Utilisateur non authentifié' });
+    const page = req.query.page ? Number(req.query.page) : undefined;
+    const pageSize = req.query.pageSize ? Number(req.query.pageSize) : undefined;
 
+    // 🧠 Construction du filtre
     const where: any = {
       OR: [
         { senderId: userId, receiverId: otherUserId },
@@ -147,27 +156,45 @@ export const getConversation = async (req: AuthRequest, res: Response) => {
       deletedAt: null,
     };
 
-    if (parkingId !== undefined) where.parkingId = parkingId;
+    if (parkingId !== undefined) {
+      where.parkingId = parkingId;
+    }
 
-    const [messages, total] = await Promise.all([
-      prisma.message.findMany({
-        where,
-        orderBy: { createdAt: 'asc' },
-        include: {
-          sender: { select: publicUserSelect },
-          receiver: { select: publicUserSelect },
-          parking: { select: publicParkingSelect },
-        },
-        skip: (page - 1) * pageSize,
-        take: pageSize,
-      }),
-      prisma.message.count({ where }),
-    ]);
+    // 📦 Options Prisma (pagination OPTIONNELLE)
+    const prismaOptions: any = {
+      where,
+      orderBy: { createdAt: 'asc' },
+      include: {
+        sender: { select: publicUserSelect },
+        receiver: { select: publicUserSelect },
+        parking: { select: publicParkingSelect },
+      },
+    };
+
+    if (page !== undefined && pageSize !== undefined) {
+      prismaOptions.skip = (page - 1) * pageSize;
+      prismaOptions.take = pageSize;
+    }
+
+    const messages = await prisma.message.findMany(prismaOptions);
+
+    // 📊 Pagination info (seulement si demandée)
+    let pagination = null;
+
+    if (page !== undefined && pageSize !== undefined) {
+      const total = await prisma.message.count({ where });
+
+      pagination = {
+        currentPage: page,
+        pageSize,
+        totalMessages: total,
+        totalPages: Math.ceil(total / pageSize),
+      };
+    }
 
     res.json({
       messages: messages.map(m => mapMessageToPublic(m)),
-      totalPages: Math.ceil(total / pageSize),
-      currentPage: page,
+      pagination,
       parkingId,
     });
   } catch (error) {
