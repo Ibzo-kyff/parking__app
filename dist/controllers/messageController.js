@@ -121,14 +121,19 @@ const getConversation = (req, res) => __awaiter(void 0, void 0, void 0, function
     var _a;
     try {
         const userId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.id;
-        const otherUserId = parseInt(req.params.userId);
-        const page = parseInt(req.query.page) || 1;
-        const pageSize = parseInt(req.query.pageSize) || 20;
-        const parkingId = req.query.parkingId
-            ? parseInt(req.query.parkingId)
-            : undefined;
-        if (!userId)
+        const otherUserId = Number(req.params.userId);
+        if (!userId) {
             return res.status(401).json({ message: 'Utilisateur non authentifié' });
+        }
+        if (!otherUserId) {
+            return res.status(400).json({ message: 'userId invalide' });
+        }
+        const parkingId = req.query.parkingId
+            ? Number(req.query.parkingId)
+            : undefined;
+        const page = req.query.page ? Number(req.query.page) : undefined;
+        const pageSize = req.query.pageSize ? Number(req.query.pageSize) : undefined;
+        // 🧠 Construction du filtre
         const where = {
             OR: [
                 { senderId: userId, receiverId: otherUserId },
@@ -136,26 +141,38 @@ const getConversation = (req, res) => __awaiter(void 0, void 0, void 0, function
             ],
             deletedAt: null,
         };
-        if (parkingId !== undefined)
+        if (parkingId !== undefined) {
             where.parkingId = parkingId;
-        const [messages, total] = yield Promise.all([
-            prisma.message.findMany({
-                where,
-                orderBy: { createdAt: 'asc' },
-                include: {
-                    sender: { select: publicUserSelect },
-                    receiver: { select: publicUserSelect },
-                    parking: { select: publicParkingSelect },
-                },
-                skip: (page - 1) * pageSize,
-                take: pageSize,
-            }),
-            prisma.message.count({ where }),
-        ]);
+        }
+        // 📦 Options Prisma (pagination OPTIONNELLE)
+        const prismaOptions = {
+            where,
+            orderBy: { createdAt: 'asc' },
+            include: {
+                sender: { select: publicUserSelect },
+                receiver: { select: publicUserSelect },
+                parking: { select: publicParkingSelect },
+            },
+        };
+        if (page !== undefined && pageSize !== undefined) {
+            prismaOptions.skip = (page - 1) * pageSize;
+            prismaOptions.take = pageSize;
+        }
+        const messages = yield prisma.message.findMany(prismaOptions);
+        // 📊 Pagination info (seulement si demandée)
+        let pagination = null;
+        if (page !== undefined && pageSize !== undefined) {
+            const total = yield prisma.message.count({ where });
+            pagination = {
+                currentPage: page,
+                pageSize,
+                totalMessages: total,
+                totalPages: Math.ceil(total / pageSize),
+            };
+        }
         res.json({
             messages: messages.map(m => mapMessageToPublic(m)),
-            totalPages: Math.ceil(total / pageSize),
-            currentPage: page,
+            pagination,
             parkingId,
         });
     }
