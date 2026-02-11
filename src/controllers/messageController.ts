@@ -478,6 +478,7 @@ export const getConversation = async (req: AuthRequest, res: Response) => {
     const page = req.query.page ? Number(req.query.page) : undefined;
     const pageSize = req.query.pageSize ? Number(req.query.pageSize) : undefined;
 
+    // 🧠 Construction du filtre
     const where: any = {
       OR: [
         { senderId: userId, receiverId: otherUserId },
