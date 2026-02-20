@@ -9,7 +9,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.markMessageAsRead = exports.deleteMessage = exports.updateMessage = exports.getUserConversations = exports.getConversation = exports.sendMessage = void 0;
+exports.markMessageAsRead = exports.deleteMessage = exports.updateMessage = exports.getUserConversations = exports.updateUserPresence = exports.getUserPresence = exports.getConversation = exports.sendMessage = void 0;
 const client_1 = require("@prisma/client");
 const index_1 = require("../index");
 const sendNotification_1 = require("../utils/sendNotification");
@@ -165,6 +165,71 @@ const getConversation = (req, res) => __awaiter(void 0, void 0, void 0, function
     }
 });
 exports.getConversation = getConversation;
+// Ajoutez cette fonction dans messageController.ts
+const getUserPresence = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
+    try {
+        const currentUserId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.id;
+        const targetUserId = parseInt(req.params.userId);
+        if (!currentUserId) {
+            return res.status(401).json({ message: 'Non authentifié' });
+        }
+        // Vérifier que l'utilisateur cible existe
+        const user = yield prisma.user.findUnique({
+            where: { id: targetUserId },
+            select: {
+                isOnline: true,
+                lastSeen: true,
+            },
+        });
+        if (!user) {
+            return res.status(404).json({ message: 'Utilisateur non trouvé' });
+        }
+        return res.status(200).json({
+            isOnline: user.isOnline,
+            lastSeen: user.lastSeen,
+        });
+    }
+    catch (error) {
+        console.error('Erreur getUserPresence:', error);
+        return res.status(500).json({ message: 'Erreur serveur' });
+    }
+});
+exports.getUserPresence = getUserPresence;
+// Optionnel : Ajoutez aussi une méthode pour mettre à jour la présence
+const updateUserPresence = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
+    try {
+        const userId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.id;
+        const { isOnline } = req.body;
+        if (!userId) {
+            return res.status(401).json({ message: 'Non authentifié' });
+        }
+        const user = yield prisma.user.update({
+            where: { id: userId },
+            data: {
+                isOnline,
+                lastSeen: new Date(),
+            },
+            select: {
+                isOnline: true,
+                lastSeen: true,
+            },
+        });
+        // Optionnel : Notifier via Pusher que le statut a changé
+        // await pusher.trigger('presence', 'user-status-changed', {
+        //   userId,
+        //   isOnline,
+        //   lastSeen: user.lastSeen,
+        // });
+        return res.status(200).json(user);
+    }
+    catch (error) {
+        console.error('Erreur updateUserPresence:', error);
+        return res.status(500).json({ message: 'Erreur serveur' });
+    }
+});
+exports.updateUserPresence = updateUserPresence;
 const getUserConversations = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a;
     try {

@@ -14,4 +14,7 @@ router.get('/conversations', messageController_1.getUserConversations);
 router.put('/:id', messageController_1.updateMessage);
 router.delete('/:id', messageController_1.deleteMessage);
 router.patch('/:id/read', messageController_1.markMessageAsRead);
+// Nouvelle route pour la présence
+router.get('/users/:userId/presence', messageController_1.getUserPresence);
+router.put('/users/presence', messageController_1.updateUserPresence); // Optionnel
 exports.default = router;
