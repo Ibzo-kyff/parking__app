@@ -6,6 +6,8 @@ import {
   updateMessage,
   deleteMessage,
   markMessageAsRead,
+  getUserPresence,    // <<< Ajoutez cette importation
+  updateUserPresence, // <<< Optionnel
 } from '../controllers/messageController';
 import { authenticateToken } from '../middleware/authMiddleware';
 
@@ -19,5 +21,8 @@ router.get('/conversations', getUserConversations);
 router.put('/:id', updateMessage);
 router.delete('/:id', deleteMessage);
 router.patch('/:id/read', markMessageAsRead);
+// Nouvelle route pour la présence
+router.get('/users/:userId/presence', getUserPresence);
+router.put('/users/presence', updateUserPresence); // Optionnel
 
 export default router;

@@ -529,7 +529,74 @@ export const getConversation = async (req: AuthRequest, res: Response) => {
     res.status(500).json({ message: 'Erreur récupération conversation' });
   }
 };
+// Ajoutez cette fonction dans messageController.ts
+export const getUserPresence = async (req: AuthRequest, res: Response) => {
+  try {
+    const currentUserId = req.user?.id;
+    const targetUserId = parseInt(req.params.userId);
 
+    if (!currentUserId) {
+      return res.status(401).json({ message: 'Non authentifié' });
+    }
+
+    // Vérifier que l'utilisateur cible existe
+    const user = await prisma.user.findUnique({
+      where: { id: targetUserId },
+      select: {
+        isOnline: true,
+        lastSeen: true,
+      },
+    });
+
+    if (!user) {
+      return res.status(404).json({ message: 'Utilisateur non trouvé' });
+    }
+
+    return res.status(200).json({
+      isOnline: user.isOnline,
+      lastSeen: user.lastSeen,
+    });
+  } catch (error) {
+    console.error('Erreur getUserPresence:', error);
+    return res.status(500).json({ message: 'Erreur serveur' });
+  }
+};
+
+// Optionnel : Ajoutez aussi une méthode pour mettre à jour la présence
+export const updateUserPresence = async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    const { isOnline } = req.body;
+
+    if (!userId) {
+      return res.status(401).json({ message: 'Non authentifié' });
+    }
+
+    const user = await prisma.user.update({
+      where: { id: userId },
+      data: {
+        isOnline,
+        lastSeen: new Date(),
+      },
+      select: {
+        isOnline: true,
+        lastSeen: true,
+      },
+    });
+
+    // Optionnel : Notifier via Pusher que le statut a changé
+    // await pusher.trigger('presence', 'user-status-changed', {
+    //   userId,
+    //   isOnline,
+    //   lastSeen: user.lastSeen,
+    // });
+
+    return res.status(200).json(user);
+  } catch (error) {
+    console.error('Erreur updateUserPresence:', error);
+    return res.status(500).json({ message: 'Erreur serveur' });
+  }
+};
 export const getUserConversations = async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.user?.id;
