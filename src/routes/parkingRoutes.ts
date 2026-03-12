@@ -1,3 +1,6 @@
+// parkingRouter.ts (VERSION CORRIGÉE)
+// Ajout du middleware authenticateToken sur POST et DELETE (manquant avant !)
+
 import express from 'express';
 import {
   createParking,
@@ -9,19 +12,18 @@ import {
 } from '../controllers/parkingController';
 import multer from 'multer';
 import { authenticateToken } from '../middleware/authMiddleware';
-// Supprimez 'path' si plus utilisé, ou gardez-le si besoin ailleurs
 
 const router = express.Router();
 
-// Config Multer en mémoire (buffer) pour Vercel
-const storage = multer.memoryStorage(); // Changement ici : pas de diskStorage
+const storage = multer.memoryStorage();
 const upload = multer({ storage });
 
-router.post('/', upload.single("logo"), createParking);
+// ROUTES AVEC AUTHENTIFICATION OBLIGATOIRE
+router.post('/', authenticateToken, upload.single("logo"), createParking);
 router.get('/', getAllParkings);
-router.get('/me',authenticateToken, getMyParking);
-router.get('/:id',getParkingById);
-router.put('/:id', authenticateToken,upload.single("logo"), updateParking);
-router.delete('/:id', deleteParking);
+router.get('/me', authenticateToken, getMyParking);
+router.get('/:id', getParkingById);
+router.put('/:id', authenticateToken, upload.single("logo"), updateParking);
+router.delete('/:id', authenticateToken, deleteParking);   // ← AJOUTÉ !
 
 export default router;

@@ -1,3 +1,9 @@
+// parkingController.ts (VERSION CORRIGÉE)
+// L'admin (Role.ADMIN) a MAINTENANT TOUS LES DROITS sur tous les parkings :
+// - Il peut créer un parking pour n'importe quel utilisateur Role.PARKING
+// - Il peut modifier/supprimer n'importe quel parking (même ceux des autres)
+// - Les propriétaires (Role.PARKING) gardent leurs droits sur leur propre parking
+
 import { Request, Response } from 'express';
 import { PrismaClient, ParkingStatus, Role } from '@prisma/client';
 import { put, del } from '@vercel/blob'; 
@@ -10,7 +16,7 @@ interface AuthRequest extends Request {
   user?: JwtPayload & { id: number; role: Role };
 }
 
-// CREATE PARKING
+// CREATE PARKING (ADMIN + PARKING OWNER)
 export const createParking = async (req: AuthRequest, res: Response) => {
   const {
     userId,
@@ -26,12 +32,22 @@ export const createParking = async (req: AuthRequest, res: Response) => {
   } = req.body;
 
   try {
-    if (!req.user || Number(userId) !== req.user.id) {
+    if (!req.user) {
+      return res.status(401).json({ error: 'Non authentifié' });
+    }
+
+    const isAdmin = req.user.role === Role.ADMIN;
+
+    // L'admin peut créer pour n'importe quel userId (tant que c'est un PARKING)
+    // Le propriétaire ne peut créer que pour lui-même
+    if (!isAdmin && Number(userId) !== req.user.id) {
       return res.status(403).json({ error: "Non autorisé" });
     }
 
-    const user = await prisma.user.findUnique({ where: { id: Number(userId) } });
-    if (!user || user.role !== Role.PARKING) {
+    const targetUser = await prisma.user.findUnique({ 
+      where: { id: Number(userId) } 
+    });
+    if (!targetUser || targetUser.role !== Role.PARKING) {
       return res.status(400).json({ error: "Utilisateur invalide ou non autorisé à gérer un parking." });
     }
 
@@ -39,7 +55,9 @@ export const createParking = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ error: "Le champ 'city' est requis" });
     }
 
-    const existingParking = await prisma.parking.findUnique({ where: { userId: Number(userId) } });
+    const existingParking = await prisma.parking.findUnique({ 
+      where: { userId: Number(userId) } 
+    });
     if (existingParking) {
       return res.status(400).json({ error: "Un parking est déjà associé à cet utilisateur." });
     }
@@ -48,7 +66,6 @@ export const createParking = async (req: AuthRequest, res: Response) => {
 
     if (req.file) {
       try {
-        // Upload vers Vercel Blob
         const blob = await put(`parking-${Date.now()}-${Math.round(Math.random() * 1e9)}.png`, 
           req.file.buffer, {
             access: 'public',
@@ -84,7 +101,7 @@ export const createParking = async (req: AuthRequest, res: Response) => {
   }
 };
 
-// GET ALL PARKINGS (inchangé)
+// GET ALL PARKINGS (inchangé - public)
 export const getAllParkings = async (_req: Request, res: Response) => {
   try {
     const parkings = await prisma.parking.findMany({
@@ -96,7 +113,7 @@ export const getAllParkings = async (_req: Request, res: Response) => {
   }
 };
 
-// GET MY PARKING
+// GET MY PARKING (inchangé - seulement pour le propriétaire)
 export const getMyParking = async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
@@ -119,7 +136,7 @@ export const getMyParking = async (req: AuthRequest, res: Response) => {
   }
 };
 
-// GET PARKING BY ID (inchangé)
+// GET PARKING BY ID (inchangé - public)
 export const getParkingById = async (req: Request, res: Response) => {
   const { id } = req.params;
   try {
@@ -136,7 +153,7 @@ export const getParkingById = async (req: Request, res: Response) => {
   }
 };
 
-// UPDATE PARKING
+// UPDATE PARKING (ADMIN + propriétaire)
 export const updateParking = async (req: AuthRequest, res: Response) => {
   const { id } = req.params;
   const {
@@ -156,31 +173,30 @@ export const updateParking = async (req: AuthRequest, res: Response) => {
       return res.status(401).json({ error: 'Non authentifié' });
     }
 
-    // Vérifier si parking existe
     const parking = await prisma.parking.findUnique({ where: { id: Number(id) } });
     if (!parking) {
       return res.status(404).json({ error: 'Parking non trouvé' });
     }
 
-    if (parking.userId !== req.user.id) {
+    const isAdmin = req.user.role === Role.ADMIN;
+
+    // L'admin peut tout modifier
+    if (!isAdmin && parking.userId !== req.user.id) {
       return res.status(403).json({ error: 'Non autorisé à modifier ce parking' });
     }
 
     let newLogo = parking.logo;
 
     if (req.file) {
-      // Supprimer l'ancien logo si existant et si c'est une URL valide
       if (parking.logo) {
         try {
           const url = new URL(parking.logo);
-          await del(url.pathname.slice(1)); // Supprime le blob si c'est une URL valide
+          await del(url.pathname.slice(1));
         } catch (error) {
-          // Si parking.logo n'est pas une URL valide, on ignore l'erreur (ancien chemin local par ex.)
-          console.warn(`Ancien logo non supprimé, URL invalide : ${parking.logo}`);
+          console.warn(`Ancien logo non supprimé : ${parking.logo}`);
         }
       }
 
-      // Upload nouveau logo vers Vercel Blob
       const newFilename = `${Date.now()}-${Math.round(Math.random() * 1e9)}${req.file.originalname ? path.extname(req.file.originalname) : '.png'}`;
       const result = await put(newFilename, req.file.buffer, {
         access: 'public',
@@ -212,7 +228,7 @@ export const updateParking = async (req: AuthRequest, res: Response) => {
   }
 };
 
-// DELETE PARKING (optionnel : ajoutez suppression du logo si besoin)
+// DELETE PARKING (ADMIN + propriétaire)
 export const deleteParking = async (req: AuthRequest, res: Response) => {
   const { id } = req.params;
   try {
@@ -225,15 +241,21 @@ export const deleteParking = async (req: AuthRequest, res: Response) => {
       return res.status(404).json({ error: 'Parking non trouvé' });
     }
 
-    if (parking.userId !== req.user.id) {
+    const isAdmin = req.user.role === Role.ADMIN;
+
+    if (!isAdmin && parking.userId !== req.user.id) {
       return res.status(403).json({ error: 'Non autorisé à supprimer ce parking' });
     }
 
     if (parking.logo) {
-      // Supprimer le logo du blob
-      const url = new URL(parking.logo);
-      await del(url.pathname.slice(1));
+      try {
+        const url = new URL(parking.logo);
+        await del(url.pathname.slice(1));
+      } catch (error) {
+        console.warn(`Logo non supprimé : ${parking.logo}`);
+      }
     }
+
     await prisma.parking.delete({ where: { id: parseInt(id) } });
     return res.json({ message: 'Parking supprimé avec succès' });
   } catch (err) {
