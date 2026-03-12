@@ -155,6 +155,7 @@ const getConversation = (req, res) => __awaiter(void 0, void 0, void 0, function
         const parkingId = req.query.parkingId ? Number(req.query.parkingId) : undefined;
         const page = req.query.page ? Number(req.query.page) : undefined;
         const pageSize = req.query.pageSize ? Number(req.query.pageSize) : undefined;
+        // 🧠 Construction du filtre
         const where = {
             OR: [
                 { senderId: userId, receiverId: otherUserId },
