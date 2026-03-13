@@ -87,7 +87,14 @@ const updateUserSchema = zod_1.z.object({
     address: zod_1.z.string().optional(),
     role: zod_1.z.nativeEnum(client_1.Role).optional(),
     status: zod_1.z.nativeEnum(client_1.Status).optional(),
-    emailVerified: zod_1.z.boolean().optional(),
+    emailVerified: zod_1.z.preprocess((val) => {
+        // FormData envoie toujours une string ('true' ou 'false')
+        if (typeof val === 'string') {
+            return val.toLowerCase() === 'true';
+        }
+        // Si c’est déjà un boolean (cas rare), on le garde
+        return !!val;
+    }, zod_1.z.boolean().optional()),
     password: zod_1.z.string().min(6).optional(),
 });
 const selfUpdateSchema = zod_1.z.object({
