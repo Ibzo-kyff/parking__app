@@ -88,7 +88,17 @@ const updateUserSchema = z.object({
   address: z.string().optional(),
   role: z.nativeEnum(Role).optional(),
   status: z.nativeEnum(Status).optional(),
-  emailVerified: z.boolean().optional(),
+  emailVerified: z.preprocess(
+  (val) => {
+    // FormData envoie toujours une string ('true' ou 'false')
+    if (typeof val === 'string') {
+      return val.toLowerCase() === 'true';
+    }
+    // Si c’est déjà un boolean (cas rare), on le garde
+    return !!val;
+  },
+  z.boolean().optional()
+),
   password: z.string().min(6).optional(),
 });
 
