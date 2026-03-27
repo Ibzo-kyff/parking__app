@@ -11,7 +11,7 @@ import marqueRoutes from "./routes/marqueRoutes";
 import messageRoutes from "./routes/messageRoutes";
 import Pusher from "pusher";
 import pusherRoutes from "./routes/pusher";
-
+import adminRouter from './routes/adminRoutes';
 const app = express();
 const prisma = new PrismaClient();
 
@@ -45,7 +45,7 @@ app.use("/api/notifications", notificationRoutes);
 app.use("/api/marques", marqueRoutes);
 app.use("/api/messages", messageRoutes);
 app.use("/api", pusherRoutes);
-
+app.use('/api/admin', adminRouter);
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error(err);
   return res.status(500).json({ error: err.message || "Erreur serveur" });

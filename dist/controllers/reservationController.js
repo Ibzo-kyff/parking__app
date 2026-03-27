@@ -9,10 +9,11 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.updateReservation = exports.getReservation = exports.getUserReservations = exports.getAllReservationsForParking = exports.getAllReservations = exports.updateReservationStatus = exports.createReservation = void 0;
+exports.deleteReservation = exports.updateReservation = exports.getReservation = exports.getUserReservations = exports.getAllReservationsForParking = exports.getAllReservations = exports.updateReservationStatus = exports.createReservation = void 0;
 const client_1 = require("@prisma/client");
 const zod_1 = require("zod");
 const sendNotification_1 = require("../utils/sendNotification");
+const auditLog_1 = require("../utils/auditLog");
 const prisma = new client_1.PrismaClient();
 const reservationSchema = zod_1.z
     .object({
@@ -58,7 +59,7 @@ const reservationSchema = zod_1.z
     path: ['type'],
 });
 const createReservation = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f;
+    var _a, _b, _c, _d, _e, _f, _g;
     try {
         if (!req.user)
             return res.status(401).json({ message: 'Non autorisé' });
@@ -148,12 +149,27 @@ const createReservation = (req, res) => __awaiter(void 0, void 0, void 0, functi
                 user: true,
             },
         });
+        yield (0, auditLog_1.createAuditLog)({
+            userId: req.user.id,
+            userName: `${req.user.prenom || ''} ${req.user.nom || ''}`.trim() || 'Client',
+            action: 'CREATE',
+            entity: 'Reservation',
+            entityId: reservation.id,
+            details: {
+                type: type,
+                vehicleId: vehicleId,
+                vehicleName: `${(_a = vehicle.marqueRef) === null || _a === void 0 ? void 0 : _a.name} ${vehicle.model}`,
+                status: 'PENDING',
+                isLocation: type === client_1.ReservationType.LOCATION,
+            },
+            ip: req.ip,
+        });
         // Notifications
         yield (0, sendNotification_1.notifyUser)(userId, 'Demande de réservation envoyée', type === client_1.ReservationType.ACHAT
-            ? `Votre demande d'achat du véhicule ${(_b = (_a = vehicle.marqueRef) === null || _a === void 0 ? void 0 : _a.name) !== null && _b !== void 0 ? _b : ''} ${vehicle.model} est en attente de confirmation.`
-            : `Votre demande de location du véhicule ${(_d = (_c = vehicle.marqueRef) === null || _c === void 0 ? void 0 : _c.name) !== null && _d !== void 0 ? _d : ''} ${vehicle.model} est en attente.`, client_1.NotificationType.RESERVATION, { reservationId: reservation.id, vehicleId });
+            ? `Votre demande d'achat du véhicule ${(_c = (_b = vehicle.marqueRef) === null || _b === void 0 ? void 0 : _b.name) !== null && _c !== void 0 ? _c : ''} ${vehicle.model} est en attente de confirmation.`
+            : `Votre demande de location du véhicule ${(_e = (_d = vehicle.marqueRef) === null || _d === void 0 ? void 0 : _d.name) !== null && _e !== void 0 ? _e : ''} ${vehicle.model} est en attente.`, client_1.NotificationType.RESERVATION, { reservationId: reservation.id, vehicleId });
         if (vehicle.parkingId) {
-            yield (0, sendNotification_1.notifyParkingOwner)(vehicle.parkingId, 'Nouvelle demande de réservation', `Nouvelle demande de ${type.toLowerCase()} pour le véhicule ${(_f = (_e = vehicle.marqueRef) === null || _e === void 0 ? void 0 : _e.name) !== null && _f !== void 0 ? _f : ''} ${vehicle.model}.`, client_1.NotificationType.RESERVATION, { reservationId: reservation.id, vehicleId });
+            yield (0, sendNotification_1.notifyParkingOwner)(vehicle.parkingId, 'Nouvelle demande de réservation', `Nouvelle demande de ${type.toLowerCase()} pour le véhicule ${(_g = (_f = vehicle.marqueRef) === null || _f === void 0 ? void 0 : _f.name) !== null && _g !== void 0 ? _g : ''} ${vehicle.model}.`, client_1.NotificationType.RESERVATION, { reservationId: reservation.id, vehicleId });
         }
         return res.status(201).json(reservation);
     }
@@ -166,6 +182,7 @@ const createReservation = (req, res) => __awaiter(void 0, void 0, void 0, functi
 });
 exports.createReservation = createReservation;
 const updateReservationStatus = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
     try {
         if (!req.user)
             return res.status(401).json({ message: 'Non autorisé' });
@@ -281,6 +298,21 @@ const updateReservationStatus = (req, res) => __awaiter(void 0, void 0, void 0, 
                 vehicle: { include: { marqueRef: true } },
                 user: true
             },
+        });
+        yield (0, auditLog_1.createAuditLog)({
+            userId: req.user.id,
+            userName: `${req.user.prenom || ''} ${req.user.nom || ''}`.trim() || req.user.role,
+            action: 'UPDATE_STATUS',
+            entity: 'Reservation',
+            entityId: Number(id),
+            details: {
+                oldStatus: reservation.status,
+                newStatus: status,
+                reason: reason || null,
+                changedBy: req.user.role,
+                vehicleName: `${(_a = reservation.vehicle.marqueRef) === null || _a === void 0 ? void 0 : _a.name} ${reservation.vehicle.model}`,
+            },
+            ip: req.ip,
         });
         // Gérer les effets secondaires
         const wasAccepted = reservation.status === client_1.ReservationStatus.ACCEPTED;
@@ -502,6 +534,18 @@ const updateReservation = (req, res) => __awaiter(void 0, void 0, void 0, functi
                 user: true
             },
         });
+        yield (0, auditLog_1.createAuditLog)({
+            userId: req.user.id,
+            userName: `${req.user.prenom || ''} ${req.user.nom || ''}`.trim() || 'Admin',
+            action: 'UPDATE',
+            entity: 'Reservation',
+            entityId: Number(id),
+            details: {
+                changes: data,
+                previousStatus: existing.status,
+            },
+            ip: req.ip,
+        });
         yield (0, sendNotification_1.notifyUser)(updated.userId, 'Réservation mise à jour', `Votre réservation du véhicule ${(_b = (_a = updated.vehicle.marqueRef) === null || _a === void 0 ? void 0 : _a.name) !== null && _b !== void 0 ? _b : 'Marque inconnue'} ${(_c = updated.vehicle.model) !== null && _c !== void 0 ? _c : ''} a été modifiée par l'administrateur.`, client_1.NotificationType.MESSAGE, { reservationId: updated.id });
         return res.json(updated);
     }
@@ -513,3 +557,87 @@ const updateReservation = (req, res) => __awaiter(void 0, void 0, void 0, functi
     }
 });
 exports.updateReservation = updateReservation;
+// Ajoute cette fonction à la fin de ton reservationController.ts
+const deleteReservation = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c;
+    try {
+        if (!req.user) {
+            return res.status(401).json({ message: 'Non autorisé' });
+        }
+        const { id } = req.params;
+        // Récupérer la réservation avec les infos nécessaires
+        const reservation = yield prisma.reservation.findUnique({
+            where: { id: Number(id) },
+            include: {
+                vehicle: {
+                    include: {
+                        marqueRef: true,
+                        parking: true
+                    }
+                },
+                user: true
+            },
+        });
+        if (!reservation) {
+            return res.status(404).json({ message: 'Réservation non trouvée' });
+        }
+        // Vérification des permissions
+        let hasPermission = false;
+        if (req.user.role === 'ADMIN') {
+            hasPermission = true;
+        }
+        else if (req.user.role === 'CLIENT') {
+            hasPermission = reservation.userId === req.user.id;
+        }
+        else if (req.user.role === 'PARKING') {
+            const parking = yield prisma.parking.findUnique({
+                where: { userId: req.user.id },
+            });
+            hasPermission = parking != null && reservation.vehicle.parkingId === parking.id;
+        }
+        if (!hasPermission) {
+            return res.status(403).json({ message: 'Accès non autorisé' });
+        }
+        // Optionnel : Empêcher la suppression d'une réservation déjà acceptée (sauf pour ADMIN)
+        if (reservation.status === client_1.ReservationStatus.ACCEPTED && req.user.role !== 'ADMIN') {
+            return res.status(400).json({
+                message: 'Impossible de supprimer une réservation déjà acceptée. Utilisez l\'annulation à la place.'
+            });
+        }
+        // Supprimer la réservation
+        yield prisma.reservation.delete({
+            where: { id: Number(id) }
+        });
+        // ==================== AUDIT LOG - Suppression ====================
+        yield (0, auditLog_1.createAuditLog)({
+            userId: req.user.id,
+            userName: `${req.user.prenom || ''} ${req.user.nom || ''}`.trim() || req.user.role,
+            action: 'DELETE',
+            entity: 'Reservation',
+            entityId: Number(id),
+            details: {
+                reservationType: reservation.type,
+                vehicleName: `${(_b = (_a = reservation.vehicle.marqueRef) === null || _a === void 0 ? void 0 : _a.name) !== null && _b !== void 0 ? _b : ''} ${(_c = reservation.vehicle.model) !== null && _c !== void 0 ? _c : ''}`,
+                previousStatus: reservation.status,
+                deletedBy: req.user.role,
+                reason: 'Suppression manuelle'
+            },
+            ip: req.ip,
+        });
+        // Si c'était une réservation ACCEPTED pour achat → remettre le véhicule disponible
+        if (reservation.type === client_1.ReservationType.ACHAT && reservation.status === client_1.ReservationStatus.ACCEPTED) {
+            yield prisma.vehicle.update({
+                where: { id: reservation.vehicleId },
+                data: { status: client_1.VehicleStatus.DISPONIBLE },
+            });
+        }
+        return res.json({
+            message: 'Réservation supprimée avec succès'
+        });
+    }
+    catch (err) {
+        console.error('Erreur lors de la suppression de la réservation:', err);
+        return res.status(500).json({ message: 'Erreur serveur' });
+    }
+});
+exports.deleteReservation = deleteReservation;

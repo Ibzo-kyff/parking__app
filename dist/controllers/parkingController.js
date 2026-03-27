@@ -21,9 +21,11 @@ exports.deleteParking = exports.updateParking = exports.getParkingById = exports
 const client_1 = require("@prisma/client");
 const blob_1 = require("@vercel/blob");
 const path_1 = __importDefault(require("path"));
+const auditLog_1 = require("../utils/auditLog");
 const prisma = new client_1.PrismaClient();
 // CREATE PARKING (ADMIN + PARKING OWNER)
 const createParking = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c;
     const { userId, name, address, phone, email, city, description, capacity, hoursOfOperation, status, } = req.body;
     try {
         if (!req.user) {
@@ -77,6 +79,16 @@ const createParking = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                 status: status || client_1.ParkingStatus.ACTIVE,
                 logo: logoUrl
             }
+        });
+        // Après la création d'un parking
+        yield (0, auditLog_1.createAuditLog)({
+            userId: (_a = req.user) === null || _a === void 0 ? void 0 : _a.id,
+            userName: `${(_b = req.user) === null || _b === void 0 ? void 0 : _b.prenom} ${(_c = req.user) === null || _c === void 0 ? void 0 : _c.nom}`,
+            action: 'CREATE',
+            entity: 'Parking',
+            entityId: newParking.id,
+            details: { name: newParking.name, city: newParking.city },
+            ip: req.ip,
         });
         return res.status(201).json({ message: 'Parking créé avec succès', parking: newParking });
     }
@@ -188,6 +200,18 @@ const updateParking = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                 logo: newLogo
             }
         });
+        yield (0, auditLog_1.createAuditLog)({
+            userId: req.user.id,
+            userName: `${req.user.prenom || ''} ${req.user.nom || ''}`.trim() || 'Admin',
+            action: 'UPDATE',
+            entity: 'Parking',
+            entityId: Number(id),
+            details: {
+                changes: { name, address, city, status },
+                updatedByAdmin: isAdmin
+            },
+            ip: req.ip,
+        });
         return res.json({ message: 'Parking mis à jour', parking: updatedParking });
     }
     catch (err) {
@@ -221,6 +245,18 @@ const deleteParking = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             }
         }
         yield prisma.parking.delete({ where: { id: parseInt(id) } });
+        yield (0, auditLog_1.createAuditLog)({
+            userId: req.user.id,
+            userName: `${req.user.prenom || ''} ${req.user.nom || ''}`.trim() || 'Admin',
+            action: 'DELETE',
+            entity: 'Parking',
+            entityId: parseInt(id),
+            details: {
+                parkingName: parking.name,
+                deletedByAdmin: isAdmin
+            },
+            ip: req.ip,
+        });
         return res.json({ message: 'Parking supprimé avec succès' });
     }
     catch (err) {

@@ -24,17 +24,37 @@ const authenticateToken = (req, res, next) => __awaiter(void 0, void 0, void 0, 
     }
     try {
         const decoded = jsonwebtoken_1.default.verify(token, process.env.ACCESS_TOKEN_SECRET);
-        const user = yield prisma.user.findUnique({ where: { id: decoded.id } });
+        const user = yield prisma.user.findUnique({
+            where: { id: decoded.id },
+            select: {
+                id: true,
+                email: true,
+                role: true, // C'est un enum Role ici
+                nom: true,
+                prenom: true,
+                phone: true,
+                status: true,
+            }
+        });
         if (!user) {
             return res.status(403).json({ message: 'Utilisateur non trouvé.' });
         }
         if (user.status === client_1.Status.PENDING) {
             return res.status(403).json({ message: 'Compte en attente d\'approbation.' });
         }
-        req.user = decoded;
+        // On assigne correctement avec le bon type Role
+        req.user = {
+            id: user.id,
+            email: user.email,
+            role: user.role, // Cast explicite
+            nom: user.nom || undefined,
+            prenom: user.prenom || undefined,
+            phone: user.phone || undefined,
+        };
         next();
     }
     catch (err) {
+        console.error('Token verification error:', err);
         return res.status(403).json({ message: 'Token invalide ou expiré.' });
     }
 });

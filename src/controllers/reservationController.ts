@@ -3,6 +3,7 @@ import { PrismaClient, ReservationType, VehicleStatus, NotificationType, Reserva
 import { z } from 'zod';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { notifyUser, notifyParkingOwner } from '../utils/sendNotification';
+import { createAuditLog } from '../utils/auditLog';
 
 const prisma = new PrismaClient();
 
@@ -167,6 +168,21 @@ export const createReservation = async (req: AuthRequest, res: Response) => {
         user: true,
       },
     });
+    await createAuditLog({
+      userId: req.user.id,
+      userName: `${req.user.prenom || ''} ${req.user.nom || ''}`.trim() || 'Client',
+      action: 'CREATE',
+      entity: 'Reservation',
+      entityId: reservation.id,
+      details: {
+        type: type,
+        vehicleId: vehicleId,
+        vehicleName: `${vehicle.marqueRef?.name} ${vehicle.model}`,
+        status: 'PENDING',
+        isLocation: type === ReservationType.LOCATION,
+      },
+      ip: req.ip,
+    });
     
     // Notifications
     await notifyUser(
@@ -327,6 +343,21 @@ export const updateReservationStatus = async (req: AuthRequest, res: Response) =
         vehicle: { include: { marqueRef: true } },
         user: true
       },
+    });
+    await createAuditLog({
+      userId: req.user.id,
+      userName: `${req.user.prenom || ''} ${req.user.nom || ''}`.trim() || req.user.role,
+      action: 'UPDATE_STATUS',
+      entity: 'Reservation',
+      entityId: Number(id),
+      details: {
+        oldStatus: reservation.status,
+        newStatus: status,
+        reason: reason || null,
+        changedBy: req.user.role,
+        vehicleName: `${reservation.vehicle.marqueRef?.name} ${reservation.vehicle.model}`,
+      },
+      ip: req.ip,
     });
 
     // Gérer les effets secondaires
@@ -580,6 +611,18 @@ export const updateReservation = async (req: AuthRequest, res: Response) => {
         user: true 
       },
     });
+    await createAuditLog({
+      userId: req.user.id,
+      userName: `${req.user.prenom || ''} ${req.user.nom || ''}`.trim() || 'Admin',
+      action: 'UPDATE',
+      entity: 'Reservation',
+      entityId: Number(id),
+      details: {
+        changes: data,
+        previousStatus: existing.status,
+      },
+      ip: req.ip,
+    });
 
     await notifyUser(
       updated.userId,
@@ -594,6 +637,100 @@ export const updateReservation = async (req: AuthRequest, res: Response) => {
     console.error(err);
     if (err instanceof z.ZodError)
       return res.status(400).json({ message: 'Données invalides', errors: err.issues });
+    return res.status(500).json({ message: 'Erreur serveur' });
+  }
+};
+// Ajoute cette fonction à la fin de ton reservationController.ts
+
+export const deleteReservation = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ message: 'Non autorisé' });
+    }
+
+    const { id } = req.params;
+
+    // Récupérer la réservation avec les infos nécessaires
+    const reservation = await prisma.reservation.findUnique({
+      where: { id: Number(id) },
+      include: {
+        vehicle: { 
+          include: { 
+            marqueRef: true,
+            parking: true 
+          } 
+        },
+        user: true
+      },
+    });
+
+    if (!reservation) {
+      return res.status(404).json({ message: 'Réservation non trouvée' });
+    }
+
+    // Vérification des permissions
+    let hasPermission = false;
+
+    if (req.user.role === 'ADMIN') {
+      hasPermission = true;
+    } 
+    else if (req.user.role === 'CLIENT') {
+      hasPermission = reservation.userId === req.user.id;
+    } 
+    else if (req.user.role === 'PARKING') {
+      const parking = await prisma.parking.findUnique({
+        where: { userId: req.user.id },
+      });
+      hasPermission = parking != null && reservation.vehicle.parkingId === parking.id;
+    }
+
+    if (!hasPermission) {
+      return res.status(403).json({ message: 'Accès non autorisé' });
+    }
+
+    // Optionnel : Empêcher la suppression d'une réservation déjà acceptée (sauf pour ADMIN)
+    if (reservation.status === ReservationStatus.ACCEPTED && req.user.role !== 'ADMIN') {
+      return res.status(400).json({ 
+        message: 'Impossible de supprimer une réservation déjà acceptée. Utilisez l\'annulation à la place.' 
+      });
+    }
+
+    // Supprimer la réservation
+    await prisma.reservation.delete({
+      where: { id: Number(id) }
+    });
+
+    // ==================== AUDIT LOG - Suppression ====================
+    await createAuditLog({
+      userId: req.user.id,
+      userName: `${req.user.prenom || ''} ${req.user.nom || ''}`.trim() || req.user.role,
+      action: 'DELETE',
+      entity: 'Reservation',
+      entityId: Number(id),
+      details: {
+        reservationType: reservation.type,
+        vehicleName: `${reservation.vehicle.marqueRef?.name ?? ''} ${reservation.vehicle.model ?? ''}`,
+        previousStatus: reservation.status,
+        deletedBy: req.user.role,
+        reason: 'Suppression manuelle'
+      },
+      ip: req.ip,
+    });
+
+    // Si c'était une réservation ACCEPTED pour achat → remettre le véhicule disponible
+    if (reservation.type === ReservationType.ACHAT && reservation.status === ReservationStatus.ACCEPTED) {
+      await prisma.vehicle.update({
+        where: { id: reservation.vehicleId },
+        data: { status: VehicleStatus.DISPONIBLE },
+      });
+    }
+
+    return res.json({ 
+      message: 'Réservation supprimée avec succès' 
+    });
+
+  } catch (err) {
+    console.error('Erreur lors de la suppression de la réservation:', err);
     return res.status(500).json({ message: 'Erreur serveur' });
   }
 };

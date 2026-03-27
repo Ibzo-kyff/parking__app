@@ -42,6 +42,7 @@ model User {
   parking                  Parking?       @relation("ParkingManager")
   reservations             Reservation[]
   vehicles                 Vehicle[]      @relation("ClientVehicles")
+  auditLogs                AuditLog[]
 }
 
 model Parking {
@@ -186,6 +187,27 @@ model Favorite {
   vehicle   Vehicle  @relation(fields: [vehicleId], references: [id])
 
   @@unique([userId, vehicleId])
+}
+
+model AuditLog {
+  id          Int      @id @default(autoincrement())
+  createdAt   DateTime @default(now())
+  
+  userId      Int?     
+  userName    String?  
+  action      String   // CREATE, UPDATE, DELETE, APPROVE, REJECT, LOGIN, etc.
+  entity      String   // User, Parking, Vehicle, Reservation, etc.
+  entityId    Int?     
+  details     Json?    // Informations détaillées (ancienne valeur / nouvelle valeur)
+  ip          String?
+  userAgent   String?
+
+  user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([entity])
+  @@index([action])
+  @@index([userId])
 }
 
 enum Role {
