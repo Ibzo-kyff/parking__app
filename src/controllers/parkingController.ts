@@ -9,6 +9,7 @@ import { PrismaClient, ParkingStatus, Role } from '@prisma/client';
 import { put, del } from '@vercel/blob'; 
 import path from 'path';
 import { JwtPayload } from 'jsonwebtoken';
+import { createAuditLog } from '../utils/auditLog';
 
 const prisma = new PrismaClient();
 
@@ -92,6 +93,16 @@ export const createParking = async (req: AuthRequest, res: Response) => {
         status: status || ParkingStatus.ACTIVE,
         logo: logoUrl
       }
+    });
+    // Après la création d'un parking
+    await createAuditLog({
+      userId: req.user?.id,
+      userName: `${req.user?.prenom} ${req.user?.nom}`,
+      action: 'CREATE',
+      entity: 'Parking',
+      entityId: newParking.id,
+      details: { name: newParking.name, city: newParking.city },
+      ip: req.ip,
     });
 
     return res.status(201).json({ message: 'Parking créé avec succès', parking: newParking });
@@ -220,6 +231,18 @@ export const updateParking = async (req: AuthRequest, res: Response) => {
         logo: newLogo
       }
     });
+    await createAuditLog({
+      userId: req.user.id,
+      userName: `${req.user.prenom || ''} ${req.user.nom || ''}`.trim() || 'Admin',
+      action: 'UPDATE',
+      entity: 'Parking',
+      entityId: Number(id),
+      details: {
+        changes: { name, address, city, status },
+        updatedByAdmin: isAdmin
+      },
+      ip: req.ip,
+    });
 
     return res.json({ message: 'Parking mis à jour', parking: updatedParking });
   } catch (err: any) {
@@ -257,6 +280,19 @@ export const deleteParking = async (req: AuthRequest, res: Response) => {
     }
 
     await prisma.parking.delete({ where: { id: parseInt(id) } });
+    
+    await createAuditLog({
+      userId: req.user.id,
+      userName: `${req.user.prenom || ''} ${req.user.nom || ''}`.trim() || 'Admin',
+      action: 'DELETE',
+      entity: 'Parking',
+      entityId: parseInt(id),
+      details: { 
+        parkingName: parking.name,
+        deletedByAdmin: isAdmin 
+      },
+      ip: req.ip,
+    });
     return res.json({ message: 'Parking supprimé avec succès' });
   } catch (err) {
     return res.status(500).json({ error: 'Erreur lors de la suppression du parking' });

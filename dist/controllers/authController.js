@@ -20,6 +20,7 @@ const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const jwtUtils_1 = require("../utils/jwtUtils");
 const nodemailer_1 = __importDefault(require("nodemailer"));
 const blob_1 = require("@vercel/blob");
+const auditLog_1 = require("../utils/auditLog");
 const prisma = new client_1.PrismaClient();
 const transporter = nodemailer_1.default.createTransport({
     service: 'gmail',
@@ -163,6 +164,18 @@ const register = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
             sameSite: 'strict',
             maxAge: 7 * 24 * 60 * 60 * 1000,
         });
+        yield (0, auditLog_1.createAuditLog)({
+            userId: user.id,
+            userName: `${user.prenom} ${user.nom}`,
+            action: 'CREATE',
+            entity: 'User',
+            entityId: user.id,
+            details: {
+                role: user.role,
+                email: user.email,
+                status: user.status,
+            },
+        });
         return res.status(201).json({
             message: 'Inscription réussie. Vérifiez votre email avec le code OTP.',
             accessToken,
@@ -207,6 +220,14 @@ const login = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
             secure: process.env.NODE_ENV === 'production',
             sameSite: 'strict',
             maxAge: 7 * 24 * 60 * 60 * 1000,
+        });
+        yield (0, auditLog_1.createAuditLog)({
+            userId: user.id,
+            userName: `${user.prenom || ''} ${user.nom || ''}`.trim() || user.email,
+            action: 'LOGIN',
+            entity: 'User',
+            entityId: user.id,
+            details: { role: user.role },
         });
         const parking = user.role === 'PARKING'
             ? yield prisma.parking.findUnique({
@@ -636,17 +657,15 @@ exports.updateUser = updateUser;
 const pushTokenSchema = zod_1.z.object({
     token: zod_1.z.string().min(1, 'Token requis'),
 });
-// Endpoint POST /users/push-token pour enregistrer/mettre à jour le token Expo Push
 const updatePushToken = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         if (!req.user)
             return res.status(401).json({ message: 'Non authentifié' });
         const { token } = pushTokenSchema.parse(req.body);
-        // Mise à jour du token dans la table User (pour tout rôle : CLIENT, PARKING, ADMIN)
         const updatedUser = yield prisma.user.update({
             where: { id: req.user.id },
             data: { expoPushToken: token },
-            select: { id: true, expoPushToken: true }, // Retourne l'essentiel pour confirmation
+            select: { id: true, expoPushToken: true },
         });
         return res.status(200).json({
             message: 'Token push enregistré avec succès',
@@ -745,6 +764,14 @@ const updateCurrentUser = (req, res) => __awaiter(void 0, void 0, void 0, functi
                 updatedAt: true,
             },
         });
+        yield (0, auditLog_1.createAuditLog)({
+            userId: req.user.id,
+            userName: `${updatedUser.prenom || ''} ${updatedUser.nom || ''}`.trim() || 'Utilisateur',
+            action: 'UPDATE',
+            entity: 'User',
+            entityId: req.user.id,
+            details: { changes: body, updatedFields: Object.keys(body).filter(k => body[k] !== undefined) },
+        });
         return res.status(200).json({ message: 'Profil mis à jour avec succès', user: updatedUser });
     }
     catch (err) {
@@ -768,21 +795,35 @@ const deleteUser = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
         if (!req.user || (req.user.role !== 'ADMIN' && req.user.id !== userId)) {
             return res.status(403).json({ message: 'Accès refusé. Seuls les administrateurs ou le propriétaire peuvent supprimer cet utilisateur.' });
         }
-        const user = yield prisma.user.findUnique({ where: { id: userId }, select: { image: true } });
-        if (!user) {
+        const userToDelete = yield prisma.user.findUnique({
+            where: { id: userId },
+            select: { image: true, nom: true, prenom: true, email: true }
+        });
+        if (!userToDelete) {
             return res.status(404).json({ message: 'Utilisateur non trouvé' });
         }
-        if (user.image) {
+        if (userToDelete.image) {
             try {
-                const url = new URL(user.image);
+                const url = new URL(userToDelete.image);
                 yield (0, blob_1.del)(url.pathname.slice(1));
             }
             catch (error) {
-                console.warn(`Ancien blob non supprimé, URL invalide : ${user.image}`);
+                console.warn(`Ancien blob non supprimé : ${userToDelete.image}`);
             }
         }
-        yield prisma.user.delete({
-            where: { id: userId },
+        yield prisma.user.delete({ where: { id: userId } });
+        yield (0, auditLog_1.createAuditLog)({
+            userId: req.user.id,
+            userName: `${req.user.prenom || ''} ${req.user.nom || ''}`.trim() || 'Admin',
+            action: 'DELETE',
+            entity: 'User',
+            entityId: userId,
+            details: {
+                deletedUserName: `${userToDelete.prenom || ''} ${userToDelete.nom || ''}`.trim(),
+                deletedUserEmail: userToDelete.email,
+                deletedBy: req.user.role
+            },
+            ip: req.ip,
         });
         return res.status(200).json({ message: 'Utilisateur supprimé avec succès' });
     }
@@ -791,7 +832,7 @@ const deleteUser = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
         if (err instanceof Error && 'code' in err && err.code === 'P2025') {
             return res.status(404).json({ message: 'Utilisateur non trouvé' });
         }
-        return res.status(500).json({ message: 'Erreur serveur', details: err instanceof Error ? err.message : 'Erreur inconnue' });
+        return res.status(500).json({ message: 'Erreur serveur' });
     }
 });
 exports.deleteUser = deleteUser;

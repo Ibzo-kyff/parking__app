@@ -26,6 +26,7 @@ const marqueRoutes_1 = __importDefault(require("./routes/marqueRoutes"));
 const messageRoutes_1 = __importDefault(require("./routes/messageRoutes"));
 const pusher_1 = __importDefault(require("pusher"));
 const pusher_2 = __importDefault(require("./routes/pusher"));
+const adminRoutes_1 = __importDefault(require("./routes/adminRoutes"));
 const app = (0, express_1.default)();
 const prisma = new client_1.PrismaClient();
 app.use((0, cors_1.default)({
@@ -53,6 +54,7 @@ app.use("/api/notifications", notificationRoutes_1.default);
 app.use("/api/marques", marqueRoutes_1.default);
 app.use("/api/messages", messageRoutes_1.default);
 app.use("/api", pusher_2.default);
+app.use('/api/admin', adminRoutes_1.default);
 app.use((err, _req, res, _next) => {
     console.error(err);
     return res.status(500).json({ error: err.message || "Erreur serveur" });
