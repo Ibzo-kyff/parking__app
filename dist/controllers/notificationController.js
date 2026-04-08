@@ -1,4 +1,9 @@
 "use strict";
+// // src/controllers/notificationController.ts
+// import {  Response } from 'express'; // ← AVANT
+// import { PrismaClient, NotificationType } from '@prisma/client';
+// import { z } from 'zod';
+// import { Expo } from 'expo-server-sdk';
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
@@ -64,7 +69,11 @@ const sendPushNotification = (token, title, body, data) => __awaiter(void 0, voi
     }
 });
 // === VÉRIFIER PROPRIÉTÉ DE LA NOTIFICATION ===
-const checkNotificationOwnership = (notificationId, userId) => __awaiter(void 0, void 0, void 0, function* () {
+// 🟢 Ajout du paramètre "role" pour autoriser l'ADMIN
+const checkNotificationOwnership = (notificationId, userId, role) => __awaiter(void 0, void 0, void 0, function* () {
+    if (role === 'ADMIN') {
+        return yield prisma.notification.findUnique({ where: { id: notificationId } });
+    }
     return yield prisma.notification.findFirst({
         where: {
             id: notificationId,
@@ -139,16 +148,23 @@ const createNotification = (req, res) => __awaiter(void 0, void 0, void 0, funct
     }
 });
 exports.createNotification = createNotification;
-// === LISTE DES NOTIFICATIONS (SEULEMENT LES SIENNES) ===
+// === LISTE DES NOTIFICATIONS ===
+// 🟢 L'Admin reçoit tout ! Le Client/Parking est restreint
 const getNotifications = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const userId = req.user.id;
+        const role = req.user.role; // Récupère le rôle du token (ADMIN, CLIENT, PARKING...)
         const { read, type } = req.query;
+        let whereClause = Object.assign(Object.assign({}, (read !== undefined && { read: read === 'true' })), (type && { type: type }));
+        // Si pas ADMIN, imposer le filtre strict par profil
+        if (role !== 'ADMIN') {
+            whereClause.OR = [
+                { userId },
+                { parking: { userId } },
+            ];
+        }
         const notifications = yield prisma.notification.findMany({
-            where: Object.assign(Object.assign({ OR: [
-                    { userId },
-                    { parking: { userId } },
-                ] }, (read !== undefined && { read: read === 'true' })), (type && { type: type })),
+            where: whereClause,
             orderBy: { createdAt: 'desc' },
             include: {
                 user: { select: { id: true, email: true, nom: true, prenom: true } },
@@ -167,9 +183,11 @@ exports.getNotifications = getNotifications;
 const getNotificationById = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const userId = req.user.id;
+        const role = req.user.role;
         const notificationId = Number(req.params.id);
         console.log(`[DEBUG] User ID: ${userId} | Notification ID: ${notificationId}`);
-        const notification = yield checkNotificationOwnership(notificationId, userId);
+        // 🟢 On passe le rôle pour autoriser la lecture à l'Admin
+        const notification = yield checkNotificationOwnership(notificationId, userId, role);
         if (!notification) {
             console.log('[DEBUG] Accès refusé ou notification inexistante');
             return res.status(404).json({ error: 'Notification non trouvée ou accès refusé' });
@@ -199,8 +217,10 @@ exports.getNotificationById = getNotificationById;
 const markAsRead = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const userId = req.user.id;
+        const role = req.user.role;
         const notificationId = Number(req.params.id);
-        const notification = yield checkNotificationOwnership(notificationId, userId);
+        // 🟢 On passe le rôle pour contourner le blocage
+        const notification = yield checkNotificationOwnership(notificationId, userId, role);
         if (!notification) {
             return res.status(404).json({ error: 'Notification non trouvée ou accès refusé' });
         }
@@ -220,8 +240,10 @@ exports.markAsRead = markAsRead;
 const deleteNotification = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const userId = req.user.id;
+        const role = req.user.role;
         const notificationId = Number(req.params.id);
-        const notification = yield checkNotificationOwnership(notificationId, userId);
+        // 🟢 On passe le rôle pour autoriser la suppression aux Admin
+        const notification = yield checkNotificationOwnership(notificationId, userId, role);
         if (!notification) {
             return res.status(404).json({ error: 'Notification non trouvée ou accès refusé' });
         }
