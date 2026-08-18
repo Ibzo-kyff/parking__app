@@ -15,7 +15,9 @@ import {
   updateCurrentUser, 
   updatePushToken,
   updateUser, 
-  deleteUser 
+  deleteUser,
+  googleLogin,
+  facebookLogin
 } from '../controllers/authController';
 import { authenticateToken } from '../middleware/authMiddleware';
 import upload from '../middleware/uploadMiddleware';
@@ -25,6 +27,8 @@ const router = express.Router();
 // Routes d'authentification
 router.post('/register', upload.single('image'), register);
 router.post('/login', login);
+router.post('/google', googleLogin);
+router.post('/facebook', facebookLogin);
 router.post('/logout', authenticateToken, logout);
 router.post('/refresh', refreshTokenHandler);
 

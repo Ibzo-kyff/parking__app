@@ -24,6 +24,6 @@ router.get('/', getAllParkings);
 router.get('/me', authenticateToken, getMyParking);
 router.get('/:id', getParkingById);
 router.put('/:id', authenticateToken, upload.single("logo"), updateParking);
-router.delete('/:id', authenticateToken, deleteParking);   // ← AJOUTÉ !
+router.delete('/:id', authenticateToken, deleteParking);  
 
 export default router;

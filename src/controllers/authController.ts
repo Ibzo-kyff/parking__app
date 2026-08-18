@@ -219,7 +219,7 @@ export const login = async (req: Request, res: Response) => {
       where: { email: data.email },
     });
 
-    if (!user || !(await bcrypt.compare(data.password, user.password))) {
+    if (!user || !user.password || !(await bcrypt.compare(data.password, user.password))) {
       return res.status(401).json({ message: 'Email ou mot de passe incorrect.' });
     }
 
@@ -267,6 +267,7 @@ export const login = async (req: Request, res: Response) => {
       nom: user.nom,
       prenom: user.prenom,
       id: user.id,
+      email: user.email,
       parkingId: parking?.id ?? null
     });
   } catch (err: unknown) {
@@ -905,5 +906,213 @@ export const deleteUser = async (req: AuthRequest, res: Response) => {
       return res.status(404).json({ message: 'Utilisateur non trouvé' });
     }
     return res.status(500).json({ message: 'Erreur serveur' });
+  }
+};
+
+export const googleLogin = async (req: Request, res: Response) => {
+  try {
+    const { idToken } = req.body;
+    if (!idToken) {
+      return res.status(400).json({ message: 'idToken est requis' });
+    }
+
+    const googleRes = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${idToken}`);
+    if (!googleRes.ok) {
+      return res.status(401).json({ message: 'Token Google invalide' });
+    }
+
+    const payload = await googleRes.json();
+    const { email, given_name, family_name, picture, email_verified } = payload;
+
+    if (!email) {
+      return res.status(400).json({ message: 'Email non fourni par Google' });
+    }
+
+    let user = await prisma.user.findUnique({
+      where: { email },
+    });
+
+    if (!user) {
+      user = await prisma.user.create({
+        data: {
+          email,
+          nom: family_name || 'Utilisateur',
+          prenom: given_name || 'Google',
+          image: picture || null,
+          role: Role.CLIENT,
+          status: Status.APPROVED,
+          emailVerified: email_verified === 'true' || email_verified === true,
+          phone: null,
+          password: null,
+        },
+      });
+    } else {
+      if (user.status === Status.PENDING) {
+        return res.status(403).json({ message: "Compte en attente d'approbation." });
+      }
+      if (user.status === Status.REJECTED) {
+        return res.status(403).json({ message: 'Compte rejeté.' });
+      }
+
+      if (!user.emailVerified) {
+        user = await prisma.user.update({
+          where: { id: user.id },
+          data: { emailVerified: true },
+        });
+      }
+    }
+
+    const accessToken = generateAccessToken({ id: user.id, email: user.email, role: user.role });
+    const refreshToken = generateRefreshToken({ id: user.id, email: user.email, role: user.role });
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { refreshToken },
+    });
+
+    res.cookie('refreshToken', refreshToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+    });
+
+    await createAuditLog({
+      userId: user.id,
+      userName: `${user.prenom || ''} ${user.nom || ''}`.trim() || user.email,
+      action: 'LOGIN',
+      entity: 'User',
+      entityId: user.id,
+      details: { role: user.role, provider: 'google' },
+    });
+
+    const parking = user.role === 'PARKING'
+      ? await prisma.parking.findUnique({
+          where: { userId: user.id },
+          select: { id: true }
+        })
+      : null;
+
+    return res.status(200).json({
+      message: 'Connexion Google réussie',
+      accessToken,
+      refreshToken,
+      role: user.role,
+      emailVerified: user.emailVerified,
+      nom: user.nom,
+      prenom: user.prenom,
+      id: user.id,
+      email: user.email,
+      parkingId: parking?.id ?? null
+    });
+  } catch (err: unknown) {
+    console.error('Erreur lors de la connexion Google:', err);
+    return res.status(500).json({ message: 'Erreur serveur', details: err instanceof Error ? err.message : 'Erreur inconnue' });
+  }
+};
+
+export const facebookLogin = async (req: Request, res: Response) => {
+  try {
+    const { accessToken: fbAccessToken } = req.body;
+    if (!fbAccessToken) {
+      return res.status(400).json({ message: 'accessToken est requis' });
+    }
+
+    const fbRes = await fetch(
+      `https://graph.facebook.com/me?fields=id,first_name,last_name,email,picture.type(large)&access_token=${fbAccessToken}`
+    );
+    if (!fbRes.ok) {
+      return res.status(401).json({ message: 'Token Facebook invalide' });
+    }
+
+    const payload = await fbRes.json();
+    const { email, first_name, last_name, picture } = payload;
+
+    if (!email) {
+      return res.status(400).json({ message: 'L\'adresse email est requise pour s\'authentifier via Facebook.' });
+    }
+
+    const imageUrl = picture?.data?.url || null;
+
+    let user = await prisma.user.findUnique({
+      where: { email },
+    });
+
+    if (!user) {
+      user = await prisma.user.create({
+        data: {
+          email,
+          nom: last_name || 'Utilisateur',
+          prenom: first_name || 'Facebook',
+          image: imageUrl,
+          role: Role.CLIENT,
+          status: Status.APPROVED,
+          emailVerified: true,
+          phone: null,
+          password: null,
+        },
+      });
+    } else {
+      if (user.status === Status.PENDING) {
+        return res.status(403).json({ message: "Compte en attente d'approbation." });
+      }
+      if (user.status === Status.REJECTED) {
+        return res.status(403).json({ message: 'Compte rejeté.' });
+      }
+
+      if (!user.emailVerified) {
+        user = await prisma.user.update({
+          where: { id: user.id },
+          data: { emailVerified: true },
+        });
+      }
+    }
+
+    const accessToken = generateAccessToken({ id: user.id, email: user.email, role: user.role });
+    const refreshToken = generateRefreshToken({ id: user.id, email: user.email, role: user.role });
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { refreshToken },
+    });
+
+    res.cookie('refreshToken', refreshToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+    });
+
+    await createAuditLog({
+      userId: user.id,
+      userName: `${user.prenom || ''} ${user.nom || ''}`.trim() || user.email,
+      action: 'LOGIN',
+      entity: 'User',
+      entityId: user.id,
+      details: { role: user.role, provider: 'facebook' },
+    });
+
+    const parking = user.role === 'PARKING'
+      ? await prisma.parking.findUnique({
+          where: { userId: user.id },
+          select: { id: true }
+        })
+      : null;
+
+    return res.status(200).json({
+      message: 'Connexion Facebook réussie',
+      accessToken,
+      refreshToken,
+      role: user.role,
+      emailVerified: user.emailVerified,
+      nom: user.nom,
+      prenom: user.prenom,
+      id: user.id,
+      email: user.email,
+      parkingId: parking?.id ?? null
+    });
+  } catch (err: unknown) {
+    console.error('Erreur lors de la connexion Facebook:', err);
+    return res.status(500).json({ message: 'Erreur serveur', details: err instanceof Error ? err.message : 'Erreur inconnue' });
   }
 };

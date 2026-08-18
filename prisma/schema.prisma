@@ -10,9 +10,9 @@ datasource db {
 model User {
   id                       Int            @id @default(autoincrement())
   email                    String         @unique
-  phone                    String         @unique
+  phone                    String?        @unique
   role                     Role           @default(CLIENT)
-  password                 String
+  password                 String?
   status                   Status         @default(PENDING)
   createdAt                DateTime       @default(now())
   updatedAt                DateTime       @updatedAt
