@@ -12,7 +12,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.deleteUser = exports.updateCurrentUser = exports.updatePushToken = exports.updateUser = exports.getCurrentUser = exports.getUserById = exports.getAllUsers = exports.verifyResetOTP = exports.resetPassword = exports.forgotPassword = exports.verifyEmailWithOTP = exports.sendVerificationEmail = exports.logout = exports.refreshTokenHandler = exports.login = exports.register = void 0;
+exports.facebookLogin = exports.googleLogin = exports.deleteUser = exports.updateCurrentUser = exports.updatePushToken = exports.updateUser = exports.getCurrentUser = exports.getUserById = exports.getAllUsers = exports.verifyResetOTP = exports.resetPassword = exports.forgotPassword = exports.verifyEmailWithOTP = exports.sendVerificationEmail = exports.logout = exports.refreshTokenHandler = exports.login = exports.register = void 0;
 const client_1 = require("@prisma/client");
 const bcrypt_1 = __importDefault(require("bcrypt"));
 const zod_1 = require("zod");
@@ -203,7 +203,7 @@ const login = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
         const user = yield prisma.user.findUnique({
             where: { email: data.email },
         });
-        if (!user || !(yield bcrypt_1.default.compare(data.password, user.password))) {
+        if (!user || !user.password || !(yield bcrypt_1.default.compare(data.password, user.password))) {
             return res.status(401).json({ message: 'Email ou mot de passe incorrect.' });
         }
         if (user.status === client_1.Status.PENDING) {
@@ -244,6 +244,7 @@ const login = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
             nom: user.nom,
             prenom: user.prenom,
             id: user.id,
+            email: user.email,
             parkingId: (_a = parking === null || parking === void 0 ? void 0 : parking.id) !== null && _a !== void 0 ? _a : null
         });
     }
@@ -836,3 +837,190 @@ const deleteUser = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
     }
 });
 exports.deleteUser = deleteUser;
+const googleLogin = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
+    try {
+        const { idToken } = req.body;
+        if (!idToken) {
+            return res.status(400).json({ message: 'idToken est requis' });
+        }
+        const googleRes = yield fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${idToken}`);
+        if (!googleRes.ok) {
+            return res.status(401).json({ message: 'Token Google invalide' });
+        }
+        const payload = yield googleRes.json();
+        const { email, given_name, family_name, picture, email_verified } = payload;
+        if (!email) {
+            return res.status(400).json({ message: 'Email non fourni par Google' });
+        }
+        let user = yield prisma.user.findUnique({
+            where: { email },
+        });
+        if (!user) {
+            user = yield prisma.user.create({
+                data: {
+                    email,
+                    nom: family_name || 'Utilisateur',
+                    prenom: given_name || 'Google',
+                    image: picture || null,
+                    role: client_1.Role.CLIENT,
+                    status: client_1.Status.APPROVED,
+                    emailVerified: email_verified === 'true' || email_verified === true,
+                    phone: null,
+                    password: null,
+                },
+            });
+        }
+        else {
+            if (user.status === client_1.Status.PENDING) {
+                return res.status(403).json({ message: "Compte en attente d'approbation." });
+            }
+            if (user.status === client_1.Status.REJECTED) {
+                return res.status(403).json({ message: 'Compte rejeté.' });
+            }
+            if (!user.emailVerified) {
+                user = yield prisma.user.update({
+                    where: { id: user.id },
+                    data: { emailVerified: true },
+                });
+            }
+        }
+        const accessToken = (0, jwtUtils_1.generateAccessToken)({ id: user.id, email: user.email, role: user.role });
+        const refreshToken = (0, jwtUtils_1.generateRefreshToken)({ id: user.id, email: user.email, role: user.role });
+        yield prisma.user.update({
+            where: { id: user.id },
+            data: { refreshToken },
+        });
+        res.cookie('refreshToken', refreshToken, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: 'strict',
+            maxAge: 7 * 24 * 60 * 60 * 1000,
+        });
+        yield (0, auditLog_1.createAuditLog)({
+            userId: user.id,
+            userName: `${user.prenom || ''} ${user.nom || ''}`.trim() || user.email,
+            action: 'LOGIN',
+            entity: 'User',
+            entityId: user.id,
+            details: { role: user.role, provider: 'google' },
+        });
+        const parking = user.role === 'PARKING'
+            ? yield prisma.parking.findUnique({
+                where: { userId: user.id },
+                select: { id: true }
+            })
+            : null;
+        return res.status(200).json({
+            message: 'Connexion Google réussie',
+            accessToken,
+            refreshToken,
+            role: user.role,
+            emailVerified: user.emailVerified,
+            nom: user.nom,
+            prenom: user.prenom,
+            id: user.id,
+            email: user.email,
+            parkingId: (_a = parking === null || parking === void 0 ? void 0 : parking.id) !== null && _a !== void 0 ? _a : null
+        });
+    }
+    catch (err) {
+        console.error('Erreur lors de la connexion Google:', err);
+        return res.status(500).json({ message: 'Erreur serveur', details: err instanceof Error ? err.message : 'Erreur inconnue' });
+    }
+});
+exports.googleLogin = googleLogin;
+const facebookLogin = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b;
+    try {
+        const { accessToken: fbAccessToken } = req.body;
+        if (!fbAccessToken) {
+            return res.status(400).json({ message: 'accessToken est requis' });
+        }
+        const fbRes = yield fetch(`https://graph.facebook.com/me?fields=id,first_name,last_name,email,picture.type(large)&access_token=${fbAccessToken}`);
+        if (!fbRes.ok) {
+            return res.status(401).json({ message: 'Token Facebook invalide' });
+        }
+        const payload = yield fbRes.json();
+        const { email, first_name, last_name, picture } = payload;
+        if (!email) {
+            return res.status(400).json({ message: 'L\'adresse email est requise pour s\'authentifier via Facebook.' });
+        }
+        const imageUrl = ((_a = picture === null || picture === void 0 ? void 0 : picture.data) === null || _a === void 0 ? void 0 : _a.url) || null;
+        let user = yield prisma.user.findUnique({
+            where: { email },
+        });
+        if (!user) {
+            user = yield prisma.user.create({
+                data: {
+                    email,
+                    nom: last_name || 'Utilisateur',
+                    prenom: first_name || 'Facebook',
+                    image: imageUrl,
+                    role: client_1.Role.CLIENT,
+                    status: client_1.Status.APPROVED,
+                    emailVerified: true,
+                    phone: null,
+                    password: null,
+                },
+            });
+        }
+        else {
+            if (user.status === client_1.Status.PENDING) {
+                return res.status(403).json({ message: "Compte en attente d'approbation." });
+            }
+            if (user.status === client_1.Status.REJECTED) {
+                return res.status(403).json({ message: 'Compte rejeté.' });
+            }
+            if (!user.emailVerified) {
+                user = yield prisma.user.update({
+                    where: { id: user.id },
+                    data: { emailVerified: true },
+                });
+            }
+        }
+        const accessToken = (0, jwtUtils_1.generateAccessToken)({ id: user.id, email: user.email, role: user.role });
+        const refreshToken = (0, jwtUtils_1.generateRefreshToken)({ id: user.id, email: user.email, role: user.role });
+        yield prisma.user.update({
+            where: { id: user.id },
+            data: { refreshToken },
+        });
+        res.cookie('refreshToken', refreshToken, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: 'strict',
+            maxAge: 7 * 24 * 60 * 60 * 1000,
+        });
+        yield (0, auditLog_1.createAuditLog)({
+            userId: user.id,
+            userName: `${user.prenom || ''} ${user.nom || ''}`.trim() || user.email,
+            action: 'LOGIN',
+            entity: 'User',
+            entityId: user.id,
+            details: { role: user.role, provider: 'facebook' },
+        });
+        const parking = user.role === 'PARKING'
+            ? yield prisma.parking.findUnique({
+                where: { userId: user.id },
+                select: { id: true }
+            })
+            : null;
+        return res.status(200).json({
+            message: 'Connexion Facebook réussie',
+            accessToken,
+            refreshToken,
+            role: user.role,
+            emailVerified: user.emailVerified,
+            nom: user.nom,
+            prenom: user.prenom,
+            id: user.id,
+            email: user.email,
+            parkingId: (_b = parking === null || parking === void 0 ? void 0 : parking.id) !== null && _b !== void 0 ? _b : null
+        });
+    }
+    catch (err) {
+        console.error('Erreur lors de la connexion Facebook:', err);
+        return res.status(500).json({ message: 'Erreur serveur', details: err instanceof Error ? err.message : 'Erreur inconnue' });
+    }
+});
+exports.facebookLogin = facebookLogin;

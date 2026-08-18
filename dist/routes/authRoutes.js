@@ -11,6 +11,8 @@ const router = express_1.default.Router();
 // Routes d'authentification
 router.post('/register', uploadMiddleware_1.default.single('image'), authController_1.register);
 router.post('/login', authController_1.login);
+router.post('/google', authController_1.googleLogin);
+router.post('/facebook', authController_1.facebookLogin);
 router.post('/logout', authMiddleware_1.authenticateToken, authController_1.logout);
 router.post('/refresh', authController_1.refreshTokenHandler);
 // Routes pour la vérification d'email
