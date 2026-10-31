@@ -34,7 +34,7 @@ app.use((0, cors_1.default)({
         "http://localhost:3000",
         "http://localhost:4000",
         "https://mobility-mali.netlify.app",
-        "https://mobility-mali.com/",
+        "https://mobility-mali.com",
         "www.mobility-mali.com",
     ],
     credentials: true,
