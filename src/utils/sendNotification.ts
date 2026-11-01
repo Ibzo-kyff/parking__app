@@ -1,6 +1,7 @@
-// utils/sendNotification.ts - Version simplifiée
-import { PrismaClient, NotificationType } from '@prisma/client';
+﻿// utils/sendNotification.ts - Hybride Expo (Mobile) + Firebase (Web Push Dashboard)
+import { PrismaClient, NotificationType, Role } from '@prisma/client';
 import { Expo } from 'expo-server-sdk';
+import { sendFirebasePush } from './firebaseAdmin';
 
 const prisma = new PrismaClient();
 const expo = new Expo({ accessToken: process.env.EXPO_ACCESS_TOKEN });
@@ -9,37 +10,47 @@ export const sendPushNotification = async (
   token: string | null | undefined,
   title: string,
   body: string,
-  data: Record<string, unknown>
+  data: Record<string, unknown> = {}
 ) => {
-  if (!token || !Expo.isExpoPushToken(token)) {
-    console.warn('Token Expo invalide ou manquant:', token);
+  if (!token) {
     return null;
   }
 
-  const message = {
-    to: token,
-    sound: 'default' as const,
-    title,
-    body: body.substring(0, 150) + (body.length > 150 ? '...' : ''),
-    data,
-    priority: 'high' as const,
-  };
+  // 1. Si c'est un token Expo (commence par ExponentPushToken[...] ou ExpoPushToken[...])
+  if (Expo.isExpoPushToken(token)) {
+    const message = {
+      to: token,
+      sound: 'default' as const,
+      title,
+      body: body.substring(0, 150) + (body.length > 150 ? '...' : ''),
+      data,
+      priority: 'high' as const,
+    };
 
-  try {
-    const receipts = await expo.sendPushNotificationsAsync([message]);
-    
-    // Nettoyage token périmé
-    const receipt = receipts[0];
-    if (receipt.status === 'error' && receipt.details?.error === 'DeviceNotRegistered') {
-      await prisma.user.updateMany({
-        where: { expoPushToken: token },
-        data: { expoPushToken: null },
-      });
+    try {
+      const receipts = await expo.sendPushNotificationsAsync([message]);
+      
+      // Nettoyage token périmé
+      const receipt = receipts[0];
+      if (receipt.status === 'error' && receipt.details?.error === 'DeviceNotRegistered') {
+        await prisma.user.updateMany({
+          where: { expoPushToken: token },
+          data: { expoPushToken: null },
+        });
+      }
+      
+      return receipt;
+    } catch (error: any) {
+      console.error('Erreur envoi push Expo:', error.message);
+      return null;
     }
-    
-    return receipt;
+  }
+
+  // 2. Sinon, c'est un token Firebase Web (FCM)
+  try {
+    return await sendFirebasePush(token, title, body, data);
   } catch (error: any) {
-    console.error('Erreur envoi push:', error.message);
+    console.error('Erreur envoi push Firebase:', error.message);
     return null;
   }
 };
@@ -69,7 +80,7 @@ export const notifyUser = async (
       select: { expoPushToken: true },
     });
 
-    // 3. Envoyer push si token valide
+    // 3. Envoyer push (Expo ou Firebase selon le token enregistré)
     if (user?.expoPushToken) {
       await sendPushNotification(user.expoPushToken, title, message, {
         notificationId: notification.id,
@@ -112,7 +123,7 @@ export const notifyParkingOwner = async (
       },
     });
 
-    // 3. Envoyer push si token valide
+    // 3. Envoyer push au parking si token valide
     if (parking.user.expoPushToken) {
       await sendPushNotification(parking.user.expoPushToken, title, message, {
         notificationId: notification.id,
@@ -124,5 +135,42 @@ export const notifyParkingOwner = async (
   } catch (error: any) {
     console.error('Erreur notifyParkingOwner:', error);
     throw error;
+  }
+};
+
+// === NOTIFIER TOUS LES ADMINISTRATEURS (PUSH + BDD) ===
+export const notifyAdmins = async (
+  title: string,
+  message: string,
+  type: NotificationType,
+  data: Record<string, unknown> = {}
+) => {
+  try {
+    const admins = await prisma.user.findMany({
+      where: { role: Role.ADMIN },
+      select: { id: true, expoPushToken: true },
+    });
+
+    for (const admin of admins) {
+      // 1. Créer la notification en BDD pour chaque admin
+      const notification = await prisma.notification.create({
+        data: {
+          title,
+          message,
+          type,
+          userId: admin.id,
+        },
+      });
+
+      // 2. Envoyer le push si token présent
+      if (admin.expoPushToken) {
+        await sendPushNotification(admin.expoPushToken, title, message, {
+          notificationId: notification.id,
+          ...data,
+        });
+      }
+    }
+  } catch (error: any) {
+    console.error('Erreur notifyAdmins:', error);
   }
 };
