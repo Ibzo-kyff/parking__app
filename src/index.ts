@@ -12,18 +12,14 @@ import messageRoutes from "./routes/messageRoutes";
 import Pusher from "pusher";
 import pusherRoutes from "./routes/pusher";
 import adminRouter from './routes/adminRoutes';
+
 const app = express();
 const prisma = new PrismaClient();
 
+// Configuration CORS ouverte à toutes les origines avec support des cookies/credentials
 app.use(
   cors({
-    origin: [
-      "http://localhost:3000",
-      "http://localhost:4000",
-      "https://mobility-mali.netlify.app",
-      "https://mobility-mali.com",
-      "www.mobility-mali.com",
-    ],
+    origin: true, // Autorise dynamiquement l'origine de la requête entrante
     credentials: true,
   })
 );
@@ -48,6 +44,7 @@ app.use("/api/marques", marqueRoutes);
 app.use("/api/messages", messageRoutes);
 app.use("/api", pusherRoutes);
 app.use('/api/admin', adminRouter);
+
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error(err);
   return res.status(500).json({ error: err.message || "Erreur serveur" });
