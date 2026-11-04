@@ -29,14 +29,9 @@ const pusher_2 = __importDefault(require("./routes/pusher"));
 const adminRoutes_1 = __importDefault(require("./routes/adminRoutes"));
 const app = (0, express_1.default)();
 const prisma = new client_1.PrismaClient();
+// Configuration CORS ouverte à toutes les origines avec support des cookies/credentials
 app.use((0, cors_1.default)({
-    origin: [
-        "http://localhost:3000",
-        "http://localhost:4000",
-        "https://mobility-mali.netlify.app",
-        "https://mobility-mali.com",
-        "www.mobility-mali.com",
-    ],
+    origin: true, // Autorise dynamiquement l'origine de la requête entrante
     credentials: true,
 }));
 app.use(express_1.default.json());
