@@ -29,16 +29,31 @@ const pusher_2 = __importDefault(require("./routes/pusher"));
 const adminRoutes_1 = __importDefault(require("./routes/adminRoutes"));
 const app = (0, express_1.default)();
 const prisma = new client_1.PrismaClient();
+const allowedOrigins = [
+    "https://mobility-mali.com",
+    "https://www.mobility-mali.com",
+    "https://mobility-mali.netlify.app",
+    "http://localhost:3000",
+    "http://localhost:5173"
+];
 app.use((0, cors_1.default)({
-    origin: [
-        "http://localhost:3000",
-        "http://localhost:4000",
-        "https://mobility-mali.netlify.app",
-        "https://mobility-mali.com",
-        "www.mobility-mali.com",
-    ],
+    origin: (origin, callback) => {
+        // Autoriser les requêtes sans origine (Postman, applications mobiles, etc.)
+        if (!origin)
+            return callback(null, true);
+        if (allowedOrigins.indexOf(origin) !== -1) {
+            callback(null, true);
+        }
+        else {
+            callback(new Error("Bloqué par la politique CORS (Non autorisé par Vercel/Express)"));
+        }
+    },
     credentials: true,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["X-CSRF-Token", "X-Requested-With", "Accept", "Accept-Version", "Content-Length", "Content-MD5", "Content-Type", "Date", "X-Api-Version", "Authorization"]
 }));
+// Gestion explicite des requêtes preflight OPTIONS
+app.options('*', (0, cors_1.default)());
 app.use(express_1.default.json());
 app.use((0, cookie_parser_1.default)());
 exports.pusher = new pusher_1.default({

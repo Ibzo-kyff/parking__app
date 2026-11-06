@@ -31,10 +31,7 @@
     },
     {
       "src": "/api/(.*)",
-      "dest": "/dist/index.js",
-      "methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
+      "dest": "/dist/index.js"
     }
-  ],
-  "outputDirectory": "dist",
-  "framework": null
+  ]
 }
