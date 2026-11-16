@@ -252,11 +252,10 @@
 import { Response } from 'express';
 import { PrismaClient, NotificationType } from '@prisma/client';
 import { z } from 'zod';
-import { Expo } from 'expo-server-sdk';
 import { AuthRequest } from '../middleware/authMiddleware';
+import { sendPushNotification } from '../utils/sendNotification';
 
 const prisma = new PrismaClient();
-const expo = new Expo({ accessToken: process.env.EXPO_ACCESS_TOKEN });
 
 // === SCHÉMA DE VALIDATION ===
 const createNotificationSchema = z.object({
@@ -266,51 +265,6 @@ const createNotificationSchema = z.object({
   userId: z.number().optional(),
   parkingId: z.number().optional(),
 });
-
-// === ENVOI PUSH + NETTOYAGE TOKEN ===
-const sendPushNotification = async (
-  token: string,
-  title: string,
-  body: string,
-  data: Record<string, unknown>
-): Promise<any> => {
-  if (!Expo.isExpoPushToken(token)) {
-    console.warn('Token Expo invalide:', token);
-    return null;
-  }
-
-  const message = {
-    to: token,
-    sound: 'default' as const,
-    title,
-    body: body.substring(0, 150) + (body.length > 150 ? '...' : ''),
-    data,
-    priority: 'high' as const,
-  };
-
-  try {
-    const receipts = await expo.sendPushNotificationsAsync([message]);
-    const receipt = receipts[0];
-
-    if (receipt.status === 'error') {
-      if (receipt.details?.error === 'DeviceNotRegistered') {
-        console.warn('Token Expo périmé → suppression:', token);
-        await prisma.user.updateMany({
-          where: { expoPushToken: token },
-          data: { expoPushToken: null },
-        });
-      } else {
-        console.error('Erreur push Expo:', receipt.details?.error);
-      }
-    } else {
-      console.log('Push envoyé avec succès:', receipt.id);
-    }
-    return receipt;
-  } catch (error: any) {
-    console.error('Erreur envoi push:', error.message);
-    return null;
-  }
-};
 
 // === VÉRIFIER PROPRIÉTÉ DE LA NOTIFICATION ===
 // 🟢 Ajout du paramètre "role" pour autoriser l'ADMIN
@@ -357,8 +311,8 @@ export const createNotification = async (req: AuthRequest, res: Response) => {
     const notification = await prisma.notification.create({
       data: { title, message, type, userId, parkingId },
       include: {
-        user: { select: { id: true, expoPushToken: true } },
-        parking: { select: { id: true, user: { select: { expoPushToken: true } } } },
+        user: { select: { id: true, expoPushToken: true, role: true } },
+        parking: { select: { id: true, user: { select: { expoPushToken: true, role: true } } } },
       },
     });
 
@@ -369,6 +323,12 @@ export const createNotification = async (req: AuthRequest, res: Response) => {
     } else if (parkingId && notification.parking?.user?.expoPushToken) {
       token = notification.parking.user.expoPushToken;
     }
+    const recipientRole = userId ? notification.user?.role : notification.parking?.user?.role;
+    const url = recipientRole === 'PARKING'
+      ? '/dashboard/parking/notifications'
+      : recipientRole === 'ADMIN'
+        ? '/dashboard/admin/notifications'
+        : '/dashboard/client/notifications';
 
     // Envoyer push
     if (token) {
@@ -376,6 +336,7 @@ export const createNotification = async (req: AuthRequest, res: Response) => {
         notificationId: notification.id,
         type,
         screen: userId ? 'UserNotifications' : 'ParkingDetails',
+        url,
       });
     } else {
       console.info('Aucun token Expo trouvé pour cette notification');

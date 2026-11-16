@@ -12,6 +12,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.pusherWebhook = exports.registerPushToken = exports.pusherAuth = void 0;
 const index_1 = require("../index");
 const client_1 = require("@prisma/client");
+const zod_1 = require("zod");
 const prisma = new client_1.PrismaClient();
 const pusherAuth = (req, res) => {
     var _a;
@@ -45,17 +46,17 @@ const pusherAuth = (req, res) => {
 };
 exports.pusherAuth = pusherAuth;
 const registerPushToken = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
-    const { token } = req.body;
+    var _a, _b;
     if (!((_a = req.user) === null || _a === void 0 ? void 0 : _a.id)) {
         return res.status(401).json({ message: 'Non authentifié' });
     }
-    if (!token) {
-        return res.status(400).json({ message: 'Token manquant' });
+    const parsedToken = zod_1.z.string().trim().min(1).max(4096).safeParse((_b = req.body) === null || _b === void 0 ? void 0 : _b.token);
+    if (!parsedToken.success) {
+        return res.status(400).json({ message: 'Token push invalide' });
     }
     yield prisma.user.update({
         where: { id: req.user.id },
-        data: { expoPushToken: token },
+        data: { expoPushToken: parsedToken.data },
     });
     res.json({ success: true });
 });

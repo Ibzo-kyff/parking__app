@@ -17,9 +17,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.deleteNotification = exports.markAsRead = exports.getNotificationById = exports.getNotifications = exports.createNotification = void 0;
 const client_1 = require("@prisma/client");
 const zod_1 = require("zod");
-const expo_server_sdk_1 = require("expo-server-sdk");
+const sendNotification_1 = require("../utils/sendNotification");
 const prisma = new client_1.PrismaClient();
-const expo = new expo_server_sdk_1.Expo({ accessToken: process.env.EXPO_ACCESS_TOKEN });
 // === SCHÉMA DE VALIDATION ===
 const createNotificationSchema = zod_1.z.object({
     title: zod_1.z.string().min(3).max(100),
@@ -27,46 +26,6 @@ const createNotificationSchema = zod_1.z.object({
     type: zod_1.z.nativeEnum(client_1.NotificationType),
     userId: zod_1.z.number().optional(),
     parkingId: zod_1.z.number().optional(),
-});
-// === ENVOI PUSH + NETTOYAGE TOKEN ===
-const sendPushNotification = (token, title, body, data) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b;
-    if (!expo_server_sdk_1.Expo.isExpoPushToken(token)) {
-        console.warn('Token Expo invalide:', token);
-        return null;
-    }
-    const message = {
-        to: token,
-        sound: 'default',
-        title,
-        body: body.substring(0, 150) + (body.length > 150 ? '...' : ''),
-        data,
-        priority: 'high',
-    };
-    try {
-        const receipts = yield expo.sendPushNotificationsAsync([message]);
-        const receipt = receipts[0];
-        if (receipt.status === 'error') {
-            if (((_a = receipt.details) === null || _a === void 0 ? void 0 : _a.error) === 'DeviceNotRegistered') {
-                console.warn('Token Expo périmé → suppression:', token);
-                yield prisma.user.updateMany({
-                    where: { expoPushToken: token },
-                    data: { expoPushToken: null },
-                });
-            }
-            else {
-                console.error('Erreur push Expo:', (_b = receipt.details) === null || _b === void 0 ? void 0 : _b.error);
-            }
-        }
-        else {
-            console.log('Push envoyé avec succès:', receipt.id);
-        }
-        return receipt;
-    }
-    catch (error) {
-        console.error('Erreur envoi push:', error.message);
-        return null;
-    }
 });
 // === VÉRIFIER PROPRIÉTÉ DE LA NOTIFICATION ===
 // 🟢 Ajout du paramètre "role" pour autoriser l'ADMIN
@@ -86,7 +45,7 @@ const checkNotificationOwnership = (notificationId, userId, role) => __awaiter(v
 });
 // === CRÉER UNE NOTIFICATION (admin/système) ===
 const createNotification = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c;
+    var _a, _b, _c, _d, _e, _f;
     try {
         const data = createNotificationSchema.parse(req.body);
         const { userId, parkingId, title, message, type } = data;
@@ -111,8 +70,8 @@ const createNotification = (req, res) => __awaiter(void 0, void 0, void 0, funct
         const notification = yield prisma.notification.create({
             data: { title, message, type, userId, parkingId },
             include: {
-                user: { select: { id: true, expoPushToken: true } },
-                parking: { select: { id: true, user: { select: { expoPushToken: true } } } },
+                user: { select: { id: true, expoPushToken: true, role: true } },
+                parking: { select: { id: true, user: { select: { expoPushToken: true, role: true } } } },
             },
         });
         // Récupérer le token Expo
@@ -123,12 +82,19 @@ const createNotification = (req, res) => __awaiter(void 0, void 0, void 0, funct
         else if (parkingId && ((_c = (_b = notification.parking) === null || _b === void 0 ? void 0 : _b.user) === null || _c === void 0 ? void 0 : _c.expoPushToken)) {
             token = notification.parking.user.expoPushToken;
         }
+        const recipientRole = userId ? (_d = notification.user) === null || _d === void 0 ? void 0 : _d.role : (_f = (_e = notification.parking) === null || _e === void 0 ? void 0 : _e.user) === null || _f === void 0 ? void 0 : _f.role;
+        const url = recipientRole === 'PARKING'
+            ? '/dashboard/parking/notifications'
+            : recipientRole === 'ADMIN'
+                ? '/dashboard/admin/notifications'
+                : '/dashboard/client/notifications';
         // Envoyer push
         if (token) {
-            yield sendPushNotification(token, title, message, {
+            yield (0, sendNotification_1.sendPushNotification)(token, title, message, {
                 notificationId: notification.id,
                 type,
                 screen: userId ? 'UserNotifications' : 'ParkingDetails',
+                url,
             });
         }
         else {

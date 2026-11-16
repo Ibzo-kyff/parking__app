@@ -1,71 +1,143 @@
-// import { initializeApp, getApps, cert } from 'firebase-admin/app';
-// import { getMessaging, Message } from 'firebase-admin/messaging';
-// import path from 'path';
-// import fs from 'fs';
+import { existsSync, readFileSync } from 'fs';
+import path from 'path';
+import {
+  applicationDefault,
+  cert,
+  getApps,
+  initializeApp,
+  ServiceAccount,
+} from 'firebase-admin/app';
+import { getMessaging, Message } from 'firebase-admin/messaging';
 
-// let firebaseInitialized = false;
+type FirebaseServiceAccount = {
+  project_id?: string;
+  projectId?: string;
+  client_email?: string;
+  clientEmail?: string;
+  private_key?: string;
+  privateKey?: string;
+};
 
-// try {
-//   const serviceAccountPath = path.resolve(process.cwd(), 'serviceAccountKey.json');
-//   if (fs.existsSync(serviceAccountPath)) {
-//     const serviceAccount = JSON.parse(fs.readFileSync(serviceAccountPath, 'utf8'));
-//     if (!getApps().length) {
-//       initializeApp({
-//         credential: cert(serviceAccount)
-//       });
-//     }
-//     firebaseInitialized = true;
-//     console.log('? Firebase Admin SDK initialis� avec succ�s.');
-//   } else {
-//     console.warn('?? serviceAccountKey.json non trouv� pour Firebase Admin.');
-//   }
-// } catch (error) {
-//   console.error('? Erreur initialisation Firebase Admin:', error);
-// }
+const getServiceAccount = (raw: FirebaseServiceAccount): ServiceAccount => {
+  const projectId = raw.project_id ?? raw.projectId;
+  const clientEmail = raw.client_email ?? raw.clientEmail;
+  const privateKey = raw.private_key ?? raw.privateKey;
 
-// export const sendFirebasePush = async (
-//   token: string,
-//   title: string,
-//   body: string,
-//   data: Record<string, unknown> = {}
-// ) => {
-//   if (!firebaseInitialized || !token) return null;
+  if (!projectId || !clientEmail || !privateKey) {
+    throw new Error(
+      'Le compte de service Firebase doit contenir project_id, client_email et private_key.'
+    );
+  }
 
-//   try {
-//     // Convertir toutes les valeurs de data en string car FCM l'exige pour le payload data
-//     const stringData: Record<string, string> = {};
-//     for (const [key, value] of Object.entries(data)) {
-//       stringData[key] = typeof value === 'string' ? value : JSON.stringify(value);
-//     }
+  return {
+    projectId,
+    clientEmail,
+    privateKey: privateKey.replace(/\\n/g, '\n'),
+  };
+};
 
-//     const message: Message = {
-//       token,
-//       notification: {
-//         title: title || 'Mobility',
-//         body,
-//         imageUrl: (data.image as string) || undefined,
-//       },
-//       data: stringData,
-//       webpush: {
-//         notification: {
-//           title: title || 'Mobility',
-//           body,
-//           icon: '/images/logo.jpg',
-//           badge: '/images/logo.jpg',
-//           image: (data.image as string) || undefined,
-//           vibrate: [200, 100, 200],
-//         },
-//         fcmOptions: {
-//           link: (data.url as string) || '/dashboard/admin/notifications',
-//         },
-//       },
-//     };
+const getFirebaseCredential = () => {
+  const serviceAccountJson = process.env.FIREBASE_SERVICE_ACCOUNT;
+  if (serviceAccountJson) {
+    return cert(getServiceAccount(JSON.parse(serviceAccountJson) as FirebaseServiceAccount));
+  }
 
-//     const response = await getMessaging().send(message);
-//     console.log('? Firebase Web Push envoy� avec succ�s (Logo Mobility inclus):', response);
-//     return response;
-//   } catch (error: any) {
-//     console.error('? Erreur envoi Firebase Push:', error.message);
-//     return null;
-//   }
-// };
+  const projectId = process.env.FIREBASE_PROJECT_ID;
+  const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
+  const privateKey = process.env.FIREBASE_PRIVATE_KEY;
+  if (projectId || clientEmail || privateKey) {
+    return cert(getServiceAccount({
+      projectId,
+      clientEmail,
+      privateKey,
+    }));
+  }
+
+  const serviceAccountPath = path.resolve(process.cwd(), 'serviceAccountKey.json');
+  if (existsSync(serviceAccountPath)) {
+    const raw = JSON.parse(readFileSync(serviceAccountPath, 'utf8')) as FirebaseServiceAccount;
+    return cert(getServiceAccount(raw));
+  }
+
+  return applicationDefault();
+};
+
+const getFirebaseMessaging = () => {
+  const app = getApps().find((candidate) => candidate.name === '[DEFAULT]')
+    ?? initializeApp({ credential: getFirebaseCredential() });
+
+  return getMessaging(app);
+};
+
+const toStringData = (data: Record<string, unknown>): Record<string, string> => {
+  const result: Record<string, string> = {};
+
+  for (const [key, value] of Object.entries(data)) {
+    if (value === undefined) continue;
+
+    const serialized = typeof value === 'string' ? value : JSON.stringify(value);
+    if (serialized !== undefined) result[key] = serialized;
+  }
+
+  return result;
+};
+
+const getWebLink = (data: Record<string, unknown>): string | undefined => {
+  const webAppUrl = process.env.WEB_APP_URL;
+  if (!webAppUrl) return undefined;
+
+  const baseUrl = new URL(webAppUrl);
+  if (baseUrl.protocol !== 'https:') return undefined;
+
+  const target = typeof data.url === 'string'
+    ? data.url
+    : '/dashboard';
+  const link = new URL(target, baseUrl);
+
+  if (link.origin !== baseUrl.origin) {
+    throw new Error('Le lien de notification doit rester sur le domaine de WEB_APP_URL.');
+  }
+
+  return link.toString();
+};
+
+export const sendFirebasePush = async (
+  token: string,
+  title: string,
+  body: string,
+  data: Record<string, unknown> = {}
+) => {
+  if (!token.trim()) throw new Error('Token FCM manquant.');
+
+  const safeTitle = title || 'Mobility';
+  const safeBody = body.substring(0, 150) + (body.length > 150 ? '...' : '');
+  const icon = process.env.FIREBASE_NOTIFICATION_ICON_URL
+    || (process.env.WEB_APP_URL
+      ? new URL('/icon-192.png', process.env.WEB_APP_URL).toString()
+      : undefined);
+  const image = typeof data.image === 'string' ? data.image : undefined;
+  const link = getWebLink(data);
+  const messageData = toStringData(data);
+  if (link) messageData.url = link;
+
+  const message: Message = {
+    token: token.trim(),
+    notification: {
+      title: safeTitle,
+      body: safeBody,
+      ...(image ? { imageUrl: image } : {}),
+    },
+    data: messageData,
+    webpush: {
+      notification: {
+        title: safeTitle,
+        body: safeBody,
+        ...(icon ? { icon } : {}),
+        ...(image ? { image } : {}),
+      },
+      ...(link ? { fcmOptions: { link } } : {}),
+    },
+  };
+
+  return getFirebaseMessaging().send(message);
+};

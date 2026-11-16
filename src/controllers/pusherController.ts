@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { pusher } from '../index';
 import { PrismaClient } from '@prisma/client';
+import { z } from 'zod';
 
 const prisma = new PrismaClient();
 
@@ -40,19 +41,18 @@ export const pusherAuth = (req: AuthRequest, res: Response) => {
 };
 
 export const registerPushToken = async (req: AuthRequest, res: Response) => {
-  const { token } = req.body;
-
   if (!req.user?.id) {
     return res.status(401).json({ message: 'Non authentifié' });
   }
 
-  if (!token) {
-    return res.status(400).json({ message: 'Token manquant' });
+  const parsedToken = z.string().trim().min(1).max(4096).safeParse(req.body?.token);
+  if (!parsedToken.success) {
+    return res.status(400).json({ message: 'Token push invalide' });
   }
 
   await prisma.user.update({
     where: { id: req.user.id },
-    data: { expoPushToken: token },
+    data: { expoPushToken: parsedToken.data },
   });
 
   res.json({ success: true });

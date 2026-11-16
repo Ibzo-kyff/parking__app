@@ -1,5 +1,7 @@
+require('dotenv').config();
+
 const { PrismaClient } = require('@prisma/client');
-const { sendFirebasePush } = require('./dist/utils/firebaseAdmin');
+const { sendPushNotification } = require('./dist/utils/sendNotification');
 
 const prisma = new PrismaClient();
 
@@ -23,25 +25,25 @@ async function test() {
   });
 
   if (usersWithTokens.length === 0) {
-    console.log('?? Aucun utilisateur n\'a encore enregistré de token.');
+    console.log('?? Aucun utilisateur n\'a encore enregistrï¿½ de token.');
     console.log('?? Connectez-vous sur le Dashboard (http://localhost:3000) et acceptez la permission pour enregistrer votre token !');
     return;
   }
 
-  console.log(`? ${usersWithTokens.length} utilisateur(s) avec token trouvé(s) :`);
+  console.log(`? ${usersWithTokens.length} utilisateur(s) avec token trouvï¿½(s) :`);
   usersWithTokens.forEach(u => console.log(`- [${u.role}] ${u.prenom} ${u.nom} (${u.email}) : Token=${u.expoPushToken.substring(0, 25)}...`));
 
   const target = usersWithTokens[0];
-  console.log(`\n?? Envoi d'un test Push à ${target.email}...`);
+  console.log(`\n?? Envoi d'un test Push ï¿½ ${target.email}...`);
 
-  const res = await sendFirebasePush(
+  const res = await sendPushNotification(
     target.expoPushToken,
     '?? Test Mobility Push',
-    'Félicitations ! Vos notifications Push Web avec le logo Mobility fonctionnent parfaitement !',
+    'Fï¿½licitations ! Vos notifications Push Web avec le logo Mobility fonctionnent parfaitement !',
     { url: '/dashboard/admin/notifications', notificationId: 9999 }
   );
 
-  console.log('Résultat:', res ? '? Succès !' : '? Échec');
+  console.log('Rï¿½sultat:', res ? '? Succï¿½s !' : '? ï¿½chec');
 }
 
 test().catch(console.error).finally(() => prisma.$disconnect());

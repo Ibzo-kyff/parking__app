@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { PrismaClient, ReservationType, VehicleStatus, NotificationType, ReservationStatus } from '@prisma/client';
+import { PrismaClient, ReservationType, VehicleStatus, NotificationType, ReservationStatus, Role } from '@prisma/client';
 import { z } from 'zod';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { notifyUser, notifyParkingOwner } from '../utils/sendNotification';
@@ -85,6 +85,7 @@ export const createReservation = async (req: AuthRequest, res: Response) => {
           },
         },
         marqueRef: true,
+        parking: true,
       },
     });
 
@@ -184,26 +185,31 @@ export const createReservation = async (req: AuthRequest, res: Response) => {
       ip: req.ip,
     });
     
-    // Notifications
+    const vehicleName = `${vehicle.marqueRef?.name ?? 'Véhicule'} ${vehicle.model}`;
+
     await notifyUser(
       userId,
       'Demande de réservation envoyée',
       type === ReservationType.ACHAT
-        ? `Votre demande d'achat du véhicule ${vehicle.marqueRef?.name ?? ''} ${vehicle.model} est en attente de confirmation.`
-        : `Votre demande de location du véhicule ${vehicle.marqueRef?.name ?? ''} ${vehicle.model} est en attente.`,
+        ? `Votre demande d'achat du véhicule ${vehicleName} est en attente de confirmation.`
+        : `Votre demande de location du véhicule ${vehicleName} est en attente.`,
       NotificationType.RESERVATION,
       { reservationId: reservation.id, vehicleId }
     );
 
-    if (vehicle.parkingId) {
-      await notifyParkingOwner(
-        vehicle.parkingId,
-        'Nouvelle demande de réservation',
-        `Nouvelle demande de ${type.toLowerCase()} pour le véhicule ${vehicle.marqueRef?.name ?? ''} ${vehicle.model}.`,
-        NotificationType.RESERVATION,
-        { reservationId: reservation.id, vehicleId }
-      );
-    }
+    const requestMessage = `Nouvelle demande de ${type.toLowerCase()} pour le véhicule ${vehicleName}.`;
+    await notifyReservationListingOwner(
+      vehicle,
+      'Nouvelle demande de réservation',
+      requestMessage,
+      reservation.id,
+      userId
+    );
+    await notifyReservationAdmins(
+      'Nouvelle demande de réservation',
+      requestMessage,
+      reservation.id
+    );
 
     return res.status(201).json(reservation);
   } catch (err) {
@@ -396,7 +402,13 @@ export const updateReservationStatus = async (req: AuthRequest, res: Response) =
     }
 
     // Envoyer les notifications appropriées
-    await sendStatusChangeNotification(reservation, status, reason, req.user.role);
+    await sendStatusChangeNotification(
+      reservation,
+      status,
+      reason,
+      req.user.role,
+      req.user.id
+    );
 
     return res.json(updatedReservation);
   } catch (err) {
@@ -410,64 +422,119 @@ async function sendStatusChangeNotification(
   reservation: any,
   newStatus: ReservationStatus,
   reason?: string,
-  changedByRole?: string
+  changedByRole?: string,
+  changedByUserId?: number
 ) {
   const vehicleName = `${reservation.vehicle.marqueRef?.name ?? 'Marque inconnue'} ${reservation.vehicle.model ?? ''}`;
-  let title = '';
-  let message = '';
+  const actionBy = changedByRole === 'CLIENT'
+    ? 'le client'
+    : changedByRole === 'PARKING'
+      ? 'le parking'
+      : 'l’administrateur';
+  const reasonText = reason ? ` Motif : ${reason}.` : '';
+  let title: string;
+  let eventMessage: string;
 
   switch (newStatus) {
     case ReservationStatus.ACCEPTED:
       title = 'Réservation acceptée';
-      if (reservation.type === ReservationType.ACHAT) {
-        message = `Votre achat du véhicule ${vehicleName} a été accepté.`;
-      } else {
-        // Formatter les dates pour la location
-        const startDate = reservation.dateDebut ? new Date(reservation.dateDebut).toLocaleDateString('fr-FR') : '';
-        const endDate = reservation.dateFin ? new Date(reservation.dateFin).toLocaleDateString('fr-FR') : '';
-        message = `Votre location du véhicule ${vehicleName} a été acceptée du ${startDate} au ${endDate}.`;
-      }
+      eventMessage = `La réservation du véhicule ${vehicleName} a été acceptée par ${actionBy}.`;
       break;
-
+    case ReservationStatus.REJECTED:
+      title = 'Réservation refusée';
+      eventMessage = `La réservation du véhicule ${vehicleName} a été refusée par ${actionBy}.${reasonText}`;
+      break;
     case ReservationStatus.CANCELED:
       title = 'Réservation annulée';
-      const byWho = changedByRole === 'CLIENT' ? 'Vous avez annulé' : 'Votre réservation a été annulée';
-      message = `${byWho} pour le véhicule ${vehicleName}${reason ? ` : ${reason}` : ''}.`;
+      eventMessage = `La réservation du véhicule ${vehicleName} a été annulée par ${actionBy}.${reasonText}`;
       break;
-
     default:
       return;
   }
 
-  // Notifier l'utilisateur
-  await notifyUser(
-    reservation.userId,
-    title,
-    message,
-    NotificationType.RESERVATION,
-    { reservationId: reservation.id, vehicleId: reservation.vehicleId }
-  );
+  const notificationData = {
+    reservationId: reservation.id,
+    vehicleId: reservation.vehicleId,
+    status: newStatus,
+  };
 
-  // Notifier le parking si ce n'est pas lui qui a fait le changement
-  if (reservation.vehicle.parkingId && changedByRole !== 'PARKING') {
-    let parkingMessage = '';
-    switch (newStatus) {
-      case ReservationStatus.CANCELED:
-        parkingMessage = `La réservation du véhicule ${vehicleName} a été annulée par ${changedByRole === 'CLIENT' ? 'le client' : 'l\'administrateur'}${reason ? ` : ${reason}` : ''}.`;
-        break;
-      // Ajouter d'autres cas si nécessaire
-    }
-
-    if (parkingMessage) {
-      await notifyParkingOwner(
-        reservation.vehicle.parkingId,
-        `Réservation ${newStatus.toLowerCase()}`,
-        parkingMessage,
-        NotificationType.RESERVATION,
-        { reservationId: reservation.id }
-      );
-    }
+  if (reservation.userId !== changedByUserId) {
+    await notifyUser(
+      reservation.userId,
+      title,
+      eventMessage,
+      NotificationType.RESERVATION,
+      notificationData
+    );
   }
+
+  await notifyReservationListingOwner(
+    reservation.vehicle,
+    title,
+    eventMessage,
+    reservation.id,
+    changedByUserId
+  );
+  await notifyReservationAdmins(
+    title,
+    eventMessage,
+    reservation.id,
+    changedByUserId
+  );
+}
+
+async function notifyReservationListingOwner(
+  vehicle: {
+    parkingId: number | null;
+    userOwnerId: number | null;
+    parking?: { id: number; userId: number } | null;
+  },
+  title: string,
+  message: string,
+  reservationId: number,
+  excludeUserId?: number
+) {
+  const ownerUserId = vehicle.parking?.userId ?? vehicle.userOwnerId;
+  if (ownerUserId === undefined || ownerUserId === null || ownerUserId === excludeUserId) {
+    return;
+  }
+
+  if (vehicle.parkingId && vehicle.parking?.id) {
+    await notifyParkingOwner(
+      vehicle.parking.id,
+      title,
+      message,
+      NotificationType.RESERVATION,
+      { reservationId }
+    );
+    return;
+  }
+
+  await notifyUser(ownerUserId, title, message, NotificationType.RESERVATION, {
+    reservationId,
+  });
+}
+
+async function notifyReservationAdmins(
+  title: string,
+  message: string,
+  reservationId: number,
+  excludeUserId?: number
+) {
+  const admins = await prisma.user.findMany({
+    where: { role: Role.ADMIN },
+    select: { id: true },
+  });
+
+  await Promise.all(
+    admins
+      .filter((admin) => admin.id !== excludeUserId)
+      .map((admin) =>
+        notifyUser(admin.id, title, message, NotificationType.RESERVATION, {
+          reservationId,
+        })
+      )
+  );
 }
 
 export const getAllReservations = async (req: AuthRequest, res: Response) => {
@@ -554,7 +621,8 @@ export const getReservation = async (req: AuthRequest, res: Response) => {
       include: { 
         vehicle: { 
           include: { 
-            marqueRef: true 
+            marqueRef: true,
+            parking: true,
           } 
         }, 
         user: true 
@@ -605,7 +673,8 @@ export const updateReservation = async (req: AuthRequest, res: Response) => {
       include: { 
         vehicle: { 
           include: { 
-            marqueRef: true 
+            marqueRef: true,
+            parking: true,
           } 
         }, 
         user: true 
@@ -624,12 +693,26 @@ export const updateReservation = async (req: AuthRequest, res: Response) => {
       ip: req.ip,
     });
 
+    const updateMessage = `La réservation du véhicule ${updated.vehicle.marqueRef?.name ?? 'Marque inconnue'} ${updated.vehicle.model ?? ''} a été modifiée par l'administrateur.`;
     await notifyUser(
       updated.userId,
       'Réservation mise à jour',
-      `Votre réservation du véhicule ${updated.vehicle.marqueRef?.name ?? 'Marque inconnue'} ${updated.vehicle.model ?? ''} a été modifiée par l'administrateur.`,
-      NotificationType.MESSAGE,
-      { reservationId: updated.id }
+      updateMessage,
+      NotificationType.RESERVATION,
+      { reservationId: updated.id, vehicleId: updated.vehicleId }
+    );
+    await notifyReservationListingOwner(
+      updated.vehicle,
+      'Réservation mise à jour',
+      updateMessage,
+      updated.id,
+      req.user.id
+    );
+    await notifyReservationAdmins(
+      'Réservation mise à jour',
+      updateMessage,
+      updated.id,
+      req.user.id
     );
 
     return res.json(updated);
@@ -724,6 +807,31 @@ export const deleteReservation = async (req: AuthRequest, res: Response) => {
         data: { status: VehicleStatus.DISPONIBLE },
       });
     }
+
+    const vehicleName = `${reservation.vehicle.marqueRef?.name ?? 'Véhicule'} ${reservation.vehicle.model}`;
+    const deletionMessage = `La réservation du véhicule ${vehicleName} a été supprimée par ${req.user.role === 'CLIENT' ? 'le client' : req.user.role === 'PARKING' ? 'le parking' : 'l’administrateur'}.`;
+    if (reservation.userId !== req.user.id) {
+      await notifyUser(
+        reservation.userId,
+        'Réservation supprimée',
+        deletionMessage,
+        NotificationType.RESERVATION,
+        { reservationId: reservation.id, vehicleId: reservation.vehicleId }
+      );
+    }
+    await notifyReservationListingOwner(
+      reservation.vehicle,
+      'Réservation supprimée',
+      deletionMessage,
+      reservation.id,
+      req.user.id
+    );
+    await notifyReservationAdmins(
+      'Réservation supprimée',
+      deletionMessage,
+      reservation.id,
+      req.user.id
+    );
 
     return res.json({ 
       message: 'Réservation supprimée avec succès' 

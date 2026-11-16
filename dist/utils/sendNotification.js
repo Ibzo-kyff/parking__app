@@ -13,36 +13,57 @@ exports.notifyParkingOwner = exports.notifyUser = exports.sendPushNotification =
 // utils/sendNotification.ts - Version simplifiée
 const client_1 = require("@prisma/client");
 const expo_server_sdk_1 = require("expo-server-sdk");
+const firebaseAdmin_1 = require("./firebaseAdmin");
 const prisma = new client_1.PrismaClient();
 const expo = new expo_server_sdk_1.Expo({ accessToken: process.env.EXPO_ACCESS_TOKEN });
 const sendPushNotification = (token, title, body, data) => __awaiter(void 0, void 0, void 0, function* () {
     var _a;
-    if (!token || !expo_server_sdk_1.Expo.isExpoPushToken(token)) {
-        console.warn('Token Expo invalide ou manquant:', token);
+    if (!(token === null || token === void 0 ? void 0 : token.trim())) {
+        console.warn('Token push manquant.');
         return null;
     }
-    const message = {
-        to: token,
-        sound: 'default',
-        title,
-        body: body.substring(0, 150) + (body.length > 150 ? '...' : ''),
-        data,
-        priority: 'high',
-    };
+    const normalizedToken = token.trim();
+    const messageBody = body.substring(0, 150) + (body.length > 150 ? '...' : '');
+    if (expo_server_sdk_1.Expo.isExpoPushToken(normalizedToken)) {
+        const message = {
+            to: normalizedToken,
+            sound: 'default',
+            title,
+            body: messageBody,
+            data,
+            priority: 'high',
+        };
+        try {
+            const receipts = yield expo.sendPushNotificationsAsync([message]);
+            const receipt = receipts[0];
+            if (receipt.status === 'error' && ((_a = receipt.details) === null || _a === void 0 ? void 0 : _a.error) === 'DeviceNotRegistered') {
+                yield prisma.user.updateMany({
+                    where: { expoPushToken: normalizedToken },
+                    data: { expoPushToken: null },
+                });
+            }
+            return receipt;
+        }
+        catch (error) {
+            console.error('Erreur envoi push Expo:', error);
+            return null;
+        }
+    }
     try {
-        const receipts = yield expo.sendPushNotificationsAsync([message]);
-        // Nettoyage token périmé
-        const receipt = receipts[0];
-        if (receipt.status === 'error' && ((_a = receipt.details) === null || _a === void 0 ? void 0 : _a.error) === 'DeviceNotRegistered') {
+        return yield (0, firebaseAdmin_1.sendFirebasePush)(normalizedToken, title, messageBody, data);
+    }
+    catch (error) {
+        const errorCode = typeof error === 'object' && error !== null && 'code' in error
+            ? error.code
+            : undefined;
+        if (errorCode === 'messaging/registration-token-not-registered'
+            || errorCode === 'messaging/invalid-registration-token') {
             yield prisma.user.updateMany({
-                where: { expoPushToken: token },
+                where: { expoPushToken: normalizedToken },
                 data: { expoPushToken: null },
             });
         }
-        return receipt;
-    }
-    catch (error) {
-        console.error('Erreur envoi push:', error.message);
+        console.error('Erreur envoi push Firebase:', error);
         return null;
     }
 });
@@ -62,11 +83,15 @@ const notifyUser = (userId_1, title_1, message_1, type_1, ...args_1) => __awaite
         // 2. Récupérer le token pour push
         const user = yield prisma.user.findUnique({
             where: { id: userId },
-            select: { expoPushToken: true },
+            select: { expoPushToken: true, role: true },
         });
         // 3. Envoyer push si token valide
         if (user === null || user === void 0 ? void 0 : user.expoPushToken) {
-            yield (0, exports.sendPushNotification)(user.expoPushToken, title, message, Object.assign({ notificationId: notification.id }, data));
+            yield (0, exports.sendPushNotification)(user.expoPushToken, title, message, Object.assign({ notificationId: notification.id, url: user.role === 'PARKING'
+                    ? '/dashboard/parking/notifications'
+                    : user.role === 'ADMIN'
+                        ? '/dashboard/admin/notifications'
+                        : '/dashboard/client/notifications' }, data));
         }
         return notification;
     }
@@ -98,7 +123,7 @@ const notifyParkingOwner = (parkingId_1, title_1, message_1, type_1, ...args_1) 
         });
         // 3. Envoyer push si token valide
         if (parking.user.expoPushToken) {
-            yield (0, exports.sendPushNotification)(parking.user.expoPushToken, title, message, Object.assign({ notificationId: notification.id }, data));
+            yield (0, exports.sendPushNotification)(parking.user.expoPushToken, title, message, Object.assign({ notificationId: notification.id, url: '/dashboard/parking/notifications' }, data));
         }
         return notification;
     }
