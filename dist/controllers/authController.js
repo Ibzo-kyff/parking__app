@@ -656,7 +656,7 @@ const updateUser = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
 });
 exports.updateUser = updateUser;
 const pushTokenSchema = zod_1.z.object({
-    token: zod_1.z.string().min(1, 'Token requis'),
+    token: zod_1.z.string().trim().min(1, 'Token requis').max(4096, 'Token trop long'),
 });
 const updatePushToken = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {

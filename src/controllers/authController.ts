@@ -713,7 +713,7 @@ export const updateUser = async (req: AuthRequest, res: Response) => {
 };
 
 const pushTokenSchema = z.object({
-  token: z.string().min(1, 'Token requis'),
+  token: z.string().trim().min(1, 'Token requis').max(4096, 'Token trop long'),
 });
 
 export const updatePushToken = async (req: AuthRequest, res: Response) => {

@@ -1,6 +1,7 @@
 ﻿// utils/sendNotification.ts - Version simplifiée
 import { PrismaClient, NotificationType } from '@prisma/client';
 import { Expo } from 'expo-server-sdk';
+import { sendFirebasePush } from './firebaseAdmin';
 
 const prisma = new PrismaClient();
 const expo = new Expo({ accessToken: process.env.EXPO_ACCESS_TOKEN });
@@ -11,35 +12,60 @@ export const sendPushNotification = async (
   body: string,
   data: Record<string, unknown>
 ) => {
-  if (!token || !Expo.isExpoPushToken(token)) {
-    console.warn('Token Expo invalide ou manquant:', token);
+  if (!token?.trim()) {
+    console.warn('Token push manquant.');
     return null;
   }
 
-  const message = {
-    to: token,
-    sound: 'default' as const,
-    title,
-    body: body.substring(0, 150) + (body.length > 150 ? '...' : ''),
-    data,
-    priority: 'high' as const,
-  };
+  const normalizedToken = token.trim();
+  const messageBody = body.substring(0, 150) + (body.length > 150 ? '...' : '');
+
+  if (Expo.isExpoPushToken(normalizedToken)) {
+    const message = {
+      to: normalizedToken,
+      sound: 'default' as const,
+      title,
+      body: messageBody,
+      data,
+      priority: 'high' as const,
+    };
+
+    try {
+      const receipts = await expo.sendPushNotificationsAsync([message]);
+      const receipt = receipts[0];
+
+      if (receipt.status === 'error' && receipt.details?.error === 'DeviceNotRegistered') {
+        await prisma.user.updateMany({
+          where: { expoPushToken: normalizedToken },
+          data: { expoPushToken: null },
+        });
+      }
+
+      return receipt;
+    } catch (error: unknown) {
+      console.error('Erreur envoi push Expo:', error);
+      return null;
+    }
+  }
 
   try {
-    const receipts = await expo.sendPushNotificationsAsync([message]);
-    
-    // Nettoyage token périmé
-    const receipt = receipts[0];
-    if (receipt.status === 'error' && receipt.details?.error === 'DeviceNotRegistered') {
+    return await sendFirebasePush(normalizedToken, title, messageBody, data);
+  } catch (error: unknown) {
+    const errorCode = typeof error === 'object' && error !== null && 'code' in error
+      ? error.code
+      : undefined;
+
+    if (
+      errorCode === 'messaging/registration-token-not-registered'
+      || errorCode === 'messaging/invalid-registration-token'
+    ) {
       await prisma.user.updateMany({
-        where: { expoPushToken: token },
+        where: { expoPushToken: normalizedToken },
         data: { expoPushToken: null },
       });
     }
-    
-    return receipt;
-  } catch (error: any) {
-    console.error('Erreur envoi push:', error.message);
+
+    console.error('Erreur envoi push Firebase:', error);
     return null;
   }
 };
@@ -66,13 +92,18 @@ export const notifyUser = async (
     // 2. Récupérer le token pour push
     const user = await prisma.user.findUnique({
       where: { id: userId },
-      select: { expoPushToken: true },
+      select: { expoPushToken: true, role: true },
     });
 
     // 3. Envoyer push si token valide
     if (user?.expoPushToken) {
       await sendPushNotification(user.expoPushToken, title, message, {
         notificationId: notification.id,
+        url: user.role === 'PARKING'
+          ? '/dashboard/parking/notifications'
+          : user.role === 'ADMIN'
+            ? '/dashboard/admin/notifications'
+            : '/dashboard/client/notifications',
         ...data,
       });
     }
@@ -116,6 +147,7 @@ export const notifyParkingOwner = async (
     if (parking.user.expoPushToken) {
       await sendPushNotification(parking.user.expoPushToken, title, message, {
         notificationId: notification.id,
+        url: '/dashboard/parking/notifications',
         ...data,
       });
     }
